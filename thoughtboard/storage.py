@@ -184,6 +184,13 @@ def get_map(project: str, map_id: str) -> dict:
         raise StorageError(f"map file {p.name} is corrupt JSON: {e}") from e
 
 
+def map_version(project: str, map_id: str) -> int:
+    """Monotonic-enough change token for a map: the file's mtime in ns.
+    Works across processes — any writer (portal, MCP instance, manual edit)
+    bumps it, which is what the board's auto-refresh polls."""
+    return _map_path(project, map_id).stat().st_mtime_ns
+
+
 def save_map(project: str, map_id: str, m: dict) -> dict:
     _map_path(project, map_id, must_exist=False)  # slug + project checks
     m = dict(m)
@@ -191,10 +198,10 @@ def save_map(project: str, map_id: str, m: dict) -> dict:
     m["project"], m["map"] = project, map_id
     validate_map(m)
     m["updated"] = _today()
-    _atomic_write(_map_path(project, map_id, must_exist=False),
-                  json.dumps(m, indent=2, ensure_ascii=False) + "\n")
+    path = _map_path(project, map_id, must_exist=False)
+    _atomic_write(path, json.dumps(m, indent=2, ensure_ascii=False) + "\n")
     return {"project": project, "map": map_id, "updated": m["updated"],
-            "nodes": len(m["nodes"])}
+            "nodes": len(m["nodes"]), "version": path.stat().st_mtime_ns}
 
 
 def create_map(project: str, map_id: str, title: str, description: str = "") -> dict:

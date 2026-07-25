@@ -84,6 +84,10 @@ def build_app(port: int = PORT_DEFAULT) -> FastAPI:
     async def api_get_map(project: str, map_id: str):
         return storage.get_map(project, map_id)
 
+    @app.get("/api/projects/{project}/maps/{map_id}/version")
+    async def api_map_version(project: str, map_id: str):
+        return {"version": storage.map_version(project, map_id)}
+
     @app.put("/api/projects/{project}/maps/{map_id}")
     async def api_save_map(project: str, map_id: str, payload: dict):
         return storage.save_map(project, map_id, payload)

@@ -179,7 +179,7 @@ const canvas = el("canvas"), svg = el("edges"), stage = el("stage"), insp = el("
 const width = id => (byId[id] === root ? ROOT_W : NODE_W);
 
 /* ---------------- persistence ---------------- */
-let saveTimer = 0, saving = false, again = false;
+let saveTimer = 0, saving = false, again = false, unsaved = false, ver = null;
 function setStat(t, cls) { const s = el("stat"); s.textContent = t; s.className = cls || ""; }
 function serialize() {
   return {
@@ -195,7 +195,7 @@ function serialize() {
     })
   };
 }
-function dirty() { setStat("unsaved", "busy"); clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 600); }
+function dirty() { unsaved = true; setStat("unsaved", "busy"); clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 600); }
 async function saveNow() {
   if (saving) { again = true; return; }
   saving = true; setStat("saving…", "busy");
@@ -204,6 +204,8 @@ async function saveNow() {
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || r.statusText);
     DATA.updated = j.updated;
+    if (j.version) ver = j.version; // our own write — don't refresh on it
+    unsaved = false;
     setStat("saved " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
   } catch (e) {
     setStat("save failed — retrying", "bad");
@@ -213,6 +215,30 @@ async function saveNow() {
     if (again) { again = false; saveNow(); }
   }
 }
+
+/* auto-refresh: poll the map's file version; re-render when another writer
+   (MCP tool, other tab, manual edit) changed it. Local edits always win. */
+async function pollVersion() {
+  let j;
+  try {
+    const r = await fetch(API + "/version");
+    if (!r.ok) return;
+    j = await r.json();
+  } catch (e) { return; }
+  if (ver === null || j.version === ver) { if (ver === null) ver = j.version; return; }
+  if (saving || unsaved) { ver = j.version; return; }   // pending local save will overwrite anyway
+  if (nd || pick || inField()) return;                  // mid-interaction — retry next tick
+  ver = j.version;
+  try {
+    const r2 = await fetch(API);
+    if (!r2.ok) return;
+    DATA = await r2.json();
+  } catch (e) { return; }
+  render();
+  if (sel && byId[sel]) select(sel); else { sel = null; paint(); renderInsp(null); }
+  setStat("synced " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+}
+setInterval(pollVersion, 2000);
 
 /* ---------------- render ---------------- */
 function index() {
