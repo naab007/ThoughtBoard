@@ -317,6 +317,64 @@ def unlink_nodes(project: str, map_id: str, from_id: str, to_id: str) -> dict:
     return {"unlinked": f"{from_id} -> {to_id}"}
 
 
+# -------------------------------------------------------------------- dump
+
+def dump_map_text(m: dict) -> str:
+    """Compact plain-text render of a map: indented tree, one line per node,
+    `id [status/PRIORITY] title #tags — description | → links`. Skips pos and
+    defaults — built for cheap agent reads, not for round-tripping."""
+    by_id = {n["id"]: n for n in m["nodes"]}
+    kids: dict[str, list] = {n["id"]: [] for n in m["nodes"]}
+    root = None
+    for n in m["nodes"]:
+        p = n.get("parent")
+        if p and p in by_id:
+            kids[p].append(n["id"])
+        elif not p:
+            root = n
+    prio_rank = {p: i for i, p in enumerate(PRIORITIES)}
+
+    def fmt(n: dict) -> str:
+        meta = n.get("status", "idea")
+        pr = n.get("priority")
+        if pr and pr != PRIORITY_DEFAULT:
+            meta += "/" + pr.upper()
+        s = f'{n["id"]} [{meta}] {n["title"]}'
+        if n.get("tags"):
+            s += " #" + " #".join(n["tags"])
+        desc = " ".join((n.get("description") or "").split())
+        if desc:
+            s += f" — {desc}"
+        links = n.get("links") or []
+        if links:
+            s += " | → " + ", ".join(
+                l["to"] + (f' ({l["label"]})' if l.get("label") else "") for l in links)
+        return s
+
+    lines = [f'# {m.get("title", "?")} ({m.get("project", "?")}/{m.get("map", "?")}) '
+             f'· updated {m.get("updated", "?")} · {len(m["nodes"])} nodes']
+    if m.get("description"):
+        lines.append(" ".join(m["description"].split()))
+    seen: set[str] = set()
+
+    def walk(nid: str, depth: int) -> None:
+        seen.add(nid)
+        lines.append("  " * depth + fmt(by_id[nid]))
+        for kid in sorted(kids.get(nid, []),
+                          key=lambda x: prio_rank.get(by_id[x].get("priority", PRIORITY_DEFAULT), 3)):
+            if kid not in seen:
+                walk(kid, depth + 1)
+
+    if root:
+        walk(root["id"], 0)
+    orphans = [n for n in m["nodes"] if n["id"] not in seen]
+    if orphans:
+        lines.append("orphaned (dangling parent):")
+        for n in orphans:
+            lines.append("  " + fmt(n))
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------- research
 
 def _research_path(project: str, doc: str, must_exist: bool = True) -> Path:

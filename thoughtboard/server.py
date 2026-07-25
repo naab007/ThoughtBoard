@@ -72,6 +72,29 @@ def get_map(project: str, map_id: str) -> dict:
 
 
 @mcp.tool()
+def dump_board(project: str, map_id: str | None = None) -> str:
+    """Token-friendly plain-text dump — the cheap way to READ a board.
+    With map_id: that map as an indented tree, one line per node:
+    `id [status/PRIORITY] title #tags — description | → links` (children sorted by
+    priority; pos and p3-default omitted). Without map_id: every map in the project
+    plus the research doc list. Prefer this over get_map unless you need to edit."""
+    if map_id is not None:
+        return storage.dump_map_text(storage.get_map(project, map_id))
+    parts = []
+    proj = next((p for p in storage.list_projects() if p["slug"] == project), None)
+    if proj is None:
+        raise storage.StorageError(
+            f"project {project!r} not found. Existing: "
+            f"{[p['slug'] for p in storage.list_projects()] or 'none'}")
+    for m in proj["maps"]:
+        parts.append(storage.dump_map_text(storage.get_map(project, m["id"])))
+    if proj["research"]:
+        parts.append("research docs (read with get_research): "
+                     + ", ".join(f'{r["doc"]} "{r["title"]}"' for r in proj["research"]))
+    return "\n\n".join(parts) if parts else f"project {project!r} has no maps yet"
+
+
+@mcp.tool()
 def create_map(project: str, map_id: str, title: str, description: str = "") -> dict:
     """Create a new empty mindmap in a project."""
     return storage.create_map(project, map_id, title, description)
