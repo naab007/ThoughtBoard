@@ -52,6 +52,9 @@ header{display:flex;align-items:center;gap:14px;padding:0 16px;height:52px;flex:
 #edges .hot.dash{stroke:var(--link)}
 #edges text.hot{fill:var(--link)}
 #edges .fade{opacity:.22}
+.guide{position:absolute;pointer-events:none;display:none;z-index:1}
+.guide.v{width:0;top:0;border-left:1px dashed color-mix(in srgb,var(--accent) 65%,transparent)}
+.guide.h{height:0;left:0;border-top:1px dashed color-mix(in srgb,var(--accent) 65%,transparent)}
 .node{position:absolute;width:212px;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);border-radius:10px;padding:11px 13px 10px;cursor:pointer;user-select:none;transition:border-color .16s,box-shadow .16s,opacity .18s;box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 6px 18px -12px #000;touch-action:none}
 .node:hover{border-color:var(--line-2)}
 .node .t{font-size:13px;font-weight:600;letter-spacing:-.005em;line-height:1.3;overflow-wrap:break-word}
@@ -141,16 +144,16 @@ header{display:flex;align-items:center;gap:14px;padding:0 16px;height:52px;flex:
   <div class="brand"><span class="mark"></span><div class="hgroup"><span class="proj" id="proj"></span><h1 id="map-title"></h1></div></div>
   <div class="spacer"></div>
   <label class="search"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6.8" cy="6.8" r="4.4"/><path d="M10.2 10.2 14 14"/></svg><input id="q" type="search" placeholder="Filter nodes" autocomplete="off"><kbd>/</kbd></label>
-  <div class="tools"><button id="zo" title="Zoom out">−</button><button class="zoom" id="zl" title="Reset zoom">100%</button><button id="zi" title="Zoom in">+</button><button id="fit" title="Fit to view (F)">⤢</button></div>
+  <div class="tools"><button id="zo" title="Zoom out">−</button><button class="zoom" id="zl" title="Reset zoom">100%</button><button id="zi" title="Zoom in">+</button><button id="fit" title="Fit to view (F)">⤢</button><button id="auto" title="Autosort: re-layout from hierarchy + links (clears manual card positions)">⇅</button></div>
   <div class="savebar"><span id="stat">loading…</span><button id="copyj" title="Copy map JSON">copy</button><button id="dlj" title="Download map JSON">json</button></div>
 </header>
 <div id="main">
   <div id="stage">
-    <div id="canvas"><svg id="edges"></svg></div>
+    <div id="canvas"><svg id="edges"></svg><div class="guide v" id="gv"></div><div class="guide h" id="gh"></div></div>
     <div id="hud"></div>
     <div id="linkhint">click a target node · esc cancels</div>
     <div id="emptymap"><button id="mkroot">＋ create root node</button></div>
-    <div id="tip">drag background to pan · drag a card to move it<br>scroll zoom · F fit · Esc clear</div>
+    <div id="tip">drag background to pan · drag a card to move it · ⇧ drag snaps<br>scroll zoom · F fit · Esc clear · ⇅ autosort</div>
   </div>
   <aside id="insp"></aside>
 </div>
@@ -236,6 +239,27 @@ function extents() {
   } else { W = 800; Hgt = 600; }
   canvas.style.width = W + "px"; canvas.style.height = Hgt + "px";
   svg.setAttribute("width", W); svg.setAttribute("height", Hgt);
+  el("gv").style.height = Hgt + "px"; el("gh").style.width = W + "px";
+}
+const GRID = 26, ALIGN_SNAP = 12;
+function hideGuides() { el("gv").style.display = "none"; el("gh").style.display = "none"; }
+function snapPos(id, px, py) {
+  // alignment first: nearest other card's x / y within threshold, else the dot grid
+  let ax = null, ay = null;
+  DATA.nodes.forEach(o => {
+    if (o.id === id) return;
+    const op = pos[o.id];
+    if (Math.abs(op.x - px) < ALIGN_SNAP && (ax === null || Math.abs(op.x - px) < Math.abs(ax - px))) ax = op.x;
+    if (Math.abs(op.y - py) < ALIGN_SNAP && (ay === null || Math.abs(op.y - py) < Math.abs(ay - py))) ay = op.y;
+  });
+  const x = ax !== null ? ax : Math.round(px / GRID) * GRID;
+  const y = ay !== null ? ay : Math.round(py / GRID) * GRID;
+  const gv = el("gv"), gh = el("gh");
+  gv.style.display = ax !== null ? "block" : "none";
+  if (ax !== null) gv.style.left = ax + "px";
+  gh.style.display = ay !== null ? "block" : "none";
+  if (ay !== null) gh.style.top = ay + "px";
+  return { x, y };
 }
 function addPath(a, b, dash, label) {
   const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -293,13 +317,17 @@ function makeNode(n) {
     if (!nd || nd.id !== n.id) return;
     if (!nd.moved && Math.hypot(e.clientX - nd.sx, e.clientY - nd.sy) < 4) return;
     nd.moved = true; d.classList.add("moving");
-    pos[n.id].x = nd.ox + (e.clientX - nd.sx) / k;
-    pos[n.id].y = nd.oy + (e.clientY - nd.sy) / k;
-    d.style.left = pos[n.id].x + "px"; d.style.top = pos[n.id].y + "px";
+    let px = nd.ox + (e.clientX - nd.sx) / k;
+    let py = nd.oy + (e.clientY - nd.sy) / k;
+    if (e.shiftKey) { const s = snapPos(n.id, px, py); px = s.x; py = s.y; }
+    else hideGuides();
+    pos[n.id].x = px; pos[n.id].y = py;
+    d.style.left = px + "px"; d.style.top = py + "px";
     scheduleEdges();
   });
   d.addEventListener("pointerup", () => {
     if (!nd || nd.id !== n.id) return;
+    hideGuides();
     if (nd.moved) { n.pos = { x: pos[n.id].x, y: pos[n.id].y }; d.classList.remove("moving"); extents(); buildEdges(); dirty(); squelch = true; }
     nd = null;
   });
@@ -402,6 +430,38 @@ function deleteNode(id) {
   });
   sel = null;
   render(); dirty(); renderInsp(null);
+}
+function autosort() {
+  if (!DATA.nodes.length) return;
+  if (!confirm("Autosort re-arranges all cards from hierarchy + cross-links and clears manual positions. Continue?")) return;
+  // Barycenter sweeps: reorder siblings so cross-linked nodes land near each other,
+  // then let the tidy-tree place everything (all manual pos cleared).
+  for (let sweep = 0; sweep < 3; sweep++) {
+    const rank = {}; DATA.nodes.forEach(n => rank[n.id] = pos[n.id] ? pos[n.id].y : 0);
+    const partners = {}; DATA.nodes.forEach(n => partners[n.id] = []);
+    DATA.nodes.forEach(n => (n.links || []).forEach(l => {
+      if (partners[l.to] !== undefined) { partners[n.id].push(l.to); partners[l.to].push(n.id); }
+    }));
+    const bary = id => {
+      const ps = partners[id];
+      if (!ps.length) return rank[id];
+      return ps.reduce((a, b) => a + (rank[b] ?? 0), 0) / ps.length;
+    };
+    index();
+    const out = [], visited = new Set();
+    const visit = id => {
+      if (visited.has(id)) return;
+      visited.add(id); out.push(byId[id]);
+      kids[id].slice().sort((a, b) => bary(a) - bary(b)).forEach(visit);
+    };
+    if (root) visit(root.id);
+    DATA.nodes.forEach(n => { if (!visited.has(n.id)) out.push(n); });
+    DATA.nodes = out;
+    DATA.nodes.forEach(n => delete n.pos);
+    render(); // fresh tidy-tree ranks for the next sweep
+  }
+  dirty(); fit(true);
+  if (sel) select(sel);
 }
 function startPick(type) {
   if (!sel) return;
@@ -596,6 +656,7 @@ stage.addEventListener("wheel", e => { e.preventDefault(); const r = stage.getBo
 el("zi").onclick = () => zoom(1.18); el("zo").onclick = () => zoom(.85);
 el("zl").onclick = () => { fit(true); };
 el("fit").onclick = () => fit(true);
+el("auto").onclick = autosort;
 el("q").addEventListener("input", e => { q = e.target.value.trim().toLowerCase(); paint(); });
 el("mkroot").addEventListener("click", () => addChild(null));
 const inField = () => ["INPUT", "TEXTAREA", "SELECT"].includes((document.activeElement || {}).tagName);
