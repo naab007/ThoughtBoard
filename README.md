@@ -108,10 +108,19 @@ auto-layout are the defaults). Node ids are stable — rename titles, never ids.
 
 ## Security
 
-Loopback only: the portal binds `127.0.0.1` and a middleware rejects requests whose
-`Host` isn't local or whose `Origin` (on state-changing methods) isn't the portal's
-own. All slugs pass a single validation chokepoint that rejects path traversal.
-Uvicorn logging is kept off stdout so MCP stdio stays clean.
+Loopback by default: the portal binds `127.0.0.1` and a middleware rejects requests
+whose `Host` isn't local or whose `Origin` (on state-changing methods) isn't the
+portal's own. All slugs pass a single validation chokepoint that rejects path
+traversal. Uvicorn logging is kept off stdout so MCP stdio stays clean.
+
+**LAN sharing** is opt-in via the `set_lan_access` MCP tool (or `lan_access` in
+`~/.thoughtboard/config.json`). The running portal watches the config and rebinds
+itself within ~4 s — no restart. In LAN mode it binds `0.0.0.0` but still enforces:
+client IPs must be loopback, RFC1918-private, or RFC6598 shared space (100.64/10,
+so Tailscale peers work); the `Host` header must be a private IP literal on the
+portal port (hostnames are rejected, which defeats DNS rebinding); and writes must
+be same-origin. On Windows you may need to allow Python through the firewall for
+private networks.
 
 ## License
 

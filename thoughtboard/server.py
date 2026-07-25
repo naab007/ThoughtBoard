@@ -40,16 +40,62 @@ def _start_portal() -> None:
     print(f"[thoughtboard] portal at http://127.0.0.1:{PORT}/", file=sys.stderr)
 
 
+def _lan_ips() -> list[str]:
+    ips = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if not ip.startswith("127."):
+                ips.add(ip)
+    except OSError:
+        pass
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ips.add(s.getsockname()[0])
+        s.close()
+    except OSError:
+        pass
+    return sorted(ips)
+
+
 # ------------------------------------------------------------------ tools
 
 @mcp.tool()
 def portal_info() -> dict:
-    """Portal URL, data directory and whether this MCP instance hosts the portal."""
+    """Portal URL(s), LAN-access state, data directory and whether this MCP
+    instance hosts the portal."""
+    lan = storage.lan_enabled()
     return {
         "url": f"http://127.0.0.1:{PORT}/",
+        "lan_access": lan,
+        "lan_urls": [f"http://{ip}:{PORT}/" for ip in _lan_ips()] if lan else [],
         "data_dir": str(storage.data_root()),
         "portal_host": _portal_state["role"],
         "board_url_pattern": f"http://127.0.0.1:{PORT}/board/<project>/<map_id>",
+    }
+
+
+@mcp.tool()
+def set_lan_access(enabled: bool) -> dict:
+    """Expose the web portal to the local network (bind 0.0.0.0), or return it to
+    loopback-only. Takes effect without a restart: the running portal process
+    watches the config and rebinds itself within ~4 seconds (a few seconds of
+    downtime — open boards retry automatically). LAN mode still enforces:
+    clients must have private/loopback IPs, the Host header must be a private IP
+    literal on the portal port (blocks DNS rebinding), and writes must be
+    same-origin. If LAN devices still can't connect, allow Python through
+    Windows Defender Firewall for private networks."""
+    cfg = storage.load_config()
+    cfg["lan_access"] = bool(enabled)
+    storage.save_config(cfg)
+    return {
+        "lan_access": bool(enabled),
+        "applies": "portal rebinds within ~4s (no restart needed)",
+        "lan_urls": [f"http://{ip}:{PORT}/" for ip in _lan_ips()] if enabled else [],
+        "note": ("Reachable from devices on your LAN. If not, add a Windows Firewall "
+                 "inbound rule for python.exe on private networks."
+                 if enabled else "Portal is loopback-only again."),
     }
 
 

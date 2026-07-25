@@ -37,6 +37,22 @@ def data_root() -> Path:
     return root
 
 
+def load_config() -> dict:
+    p = data_root() / "config.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_config(cfg: dict) -> None:
+    _atomic_write(data_root() / "config.json", json.dumps(cfg, indent=2) + "\n")
+
+
+def lan_enabled() -> bool:
+    return bool(load_config().get("lan_access", False))
+
+
 def check_slug(kind: str, value: str) -> str:
     if not isinstance(value, str) or not SLUG_RE.match(value):
         raise StorageError(
