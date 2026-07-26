@@ -41,7 +41,7 @@ header{display:flex;align-items:center;gap:14px;padding:0 16px;height:52px;flex:
 #stat.bad{color:var(--bad)}
 /* canvas */
 #main{flex:1;display:flex;min-height:0}
-#stage{flex:1;position:relative;overflow:hidden;cursor:grab;background:radial-gradient(circle at 1px 1px,rgba(255,255,255,.055) 1px,transparent 0) 0 0/26px 26px,radial-gradient(120% 90% at 30% 0,#0d1016 0,var(--bg) 70%)}
+#stage{flex:1;position:relative;overflow:hidden;cursor:grab;touch-action:none;background:radial-gradient(circle at 1px 1px,rgba(255,255,255,.055) 1px,transparent 0) 0 0/26px 26px,radial-gradient(120% 90% at 30% 0,#0d1016 0,var(--bg) 70%)}
 #stage.dragging{cursor:grabbing}
 #stage::after{content:"";position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 140px 30px rgba(0,0,0,.55)}
 #canvas{position:absolute;transform-origin:0 0}
@@ -136,6 +136,26 @@ header{display:flex;align-items:center;gap:14px;padding:0 16px;height:52px;flex:
 #insp li.lrow .del{width:18px;height:18px;display:grid;place-items:center;border-radius:5px;color:var(--text-3);font-size:13px;flex:0 0 auto}
 #insp li.lrow .del:hover{color:var(--bad);background:var(--bg-2)}
 #insp .empty{color:var(--text-3);font-size:12.5px;margin-top:20px;line-height:1.7}
+#insp .close{display:none;position:sticky;top:0;margin-left:auto;width:32px;height:32px;border-radius:8px;background:var(--bg-2);border:1px solid var(--line);color:var(--text-2);font-size:15px;place-items:center;z-index:1}
+/* tablet / narrow: inspector becomes a slide-in drawer */
+@media (max-width:900px){
+  #insp{position:fixed;top:52px;right:0;bottom:0;width:min(86vw,340px);transform:translateX(105%);transition:transform .25s ease;box-shadow:-18px 0 44px -18px #000;z-index:4;border-left:1px solid var(--line-2)}
+  #insp.open{transform:translateX(0)}
+  #insp .close{display:grid}
+  #tip{display:none}
+  header{gap:8px;padding:0 10px}
+  .brand .proj{display:none}
+  .search{width:132px}
+}
+/* touch devices: larger hit targets */
+@media (pointer:coarse){
+  .tools button{width:36px;height:34px}
+  .savebar button{padding:9px 11px}
+  #hud button{padding:8px 11px}
+  #insp li button.row{padding:10px 8px}
+  #insp li.lrow{padding:9px 8px}
+  #insp li.lrow .del{width:26px;height:26px}
+}
 </style>
 </head>
 <body>
@@ -423,6 +443,7 @@ function paint() {
     p.n.classList.toggle("fade", (!!sel && !hot) || (!!q && !hot));
   });
 }
+const narrow = () => window.matchMedia("(max-width:900px)").matches;
 function select(id, center) {
   sel = id && byId[id] ? id : null;
   paint(); renderInsp(sel);
@@ -495,6 +516,7 @@ function startPick(type) {
   stage.classList.add("linking");
   dom[sel].classList.add("linksrc");
   el("linkhint").textContent = type === "link" ? "click a target node · esc cancels" : "click the new parent · esc cancels";
+  insp.classList.remove("open"); // drawer would cover the targets on tablets
 }
 function endPick() {
   if (pick && dom[pick.from]) dom[pick.from].classList.remove("linksrc");
@@ -531,10 +553,14 @@ function finishPick(target) {
 function renderInsp(id) {
   const n = id ? byId[id] : null;
   insp.innerHTML = "";
+  insp.classList.toggle("open", !!n && narrow());
   if (!n) {
     insp.innerHTML = '<div class="eyebrow">Inspector</div><p class="empty">Select a node to edit it. Drag a card to move it; ＋ link connects nodes; edits save automatically.</p>';
     return;
   }
+  const closeBtn = document.createElement("button"); closeBtn.className = "close"; closeBtn.textContent = "✕"; closeBtn.title = "Close";
+  closeBtn.addEventListener("click", () => { sel = null; paint(); renderInsp(null); });
+  insp.appendChild(closeBtn);
   const trail = []; for (let c = n; c; c = c.parent ? byId[c.parent] : null) trail.unshift(c.title);
   const head = document.createElement("div");
   head.innerHTML = '<div class="eyebrow">Node</div><div class="crumb"></div>';
@@ -664,9 +690,37 @@ function centerOn(id) {
   const r = stage.getBoundingClientRect(), p = pos[id];
   tx = r.width / 2 - (p.x + width(id) / 2) * k; ty = r.height / 2 - (p.y + H[id] / 2) * k; apply(true);
 }
-stage.addEventListener("pointerdown", e => { drag = true; moved = false; sx = e.clientX - tx; sy = e.clientY - ty; stage.classList.add("dragging"); try { stage.setPointerCapture(e.pointerId); } catch (err) {} });
-stage.addEventListener("pointermove", e => { if (!drag) return; moved = true; tx = e.clientX - sx; ty = e.clientY - sy; apply(false); });
+/* two-finger pinch zoom (touch) */
+const touches = new Map();
+let pinch = null;
+stage.addEventListener("pointerdown", e => {
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size === 2) {
+    const [a, b] = [...touches.values()];
+    pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, k0: k, tx0: tx, ty0: ty };
+    drag = false; stage.classList.remove("dragging");
+    return;
+  }
+  drag = true; moved = false; sx = e.clientX - tx; sy = e.clientY - ty; stage.classList.add("dragging"); try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+});
+stage.addEventListener("pointermove", e => {
+  if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch && touches.size === 2) {
+    const [a, b] = [...touches.values()];
+    const r = stage.getBoundingClientRect();
+    const mid = { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top };
+    const ns = Math.min(2.4, Math.max(.28, pinch.k0 * (Math.hypot(a.x - b.x, a.y - b.y) || 1) / pinch.d0));
+    const cx = (mid.x - pinch.tx0) / pinch.k0, cy = (mid.y - pinch.ty0) / pinch.k0;
+    k = ns; tx = mid.x - cx * ns; ty = mid.y - cy * ns; apply(false);
+    moved = true;
+    return;
+  }
+  if (!drag) return; moved = true; tx = e.clientX - sx; ty = e.clientY - sy; apply(false);
+});
+const dropTouch = e => { touches.delete(e.pointerId); if (touches.size < 2) pinch = null; };
+stage.addEventListener("pointercancel", e => { dropTouch(e); drag = false; stage.classList.remove("dragging"); });
 stage.addEventListener("pointerup", e => {
+  dropTouch(e);
   const wasDrag = drag;
   drag = false; stage.classList.remove("dragging");
   // Only treat this as a background click if the press STARTED on the background
@@ -727,7 +781,8 @@ el("dlj").addEventListener("click", () => {
   }
   render(); fit(false);
   setStat("saved " + (DATA.updated || ""));
-  if (root) select(root.id); else renderInsp(null);
+  // on tablets the drawer would cover the freshly loaded map — start unselected there
+  if (root && !narrow()) select(root.id); else renderInsp(null);
 })();
 </script>
 </body>
