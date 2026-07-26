@@ -26,6 +26,9 @@ STATUSES = ["idea", "researching", "planned", "in-progress", "done", "blocked"]
 PRIORITIES = ["p0", "p1", "p2", "p3", "p4", "p5", "p6"]  # p0 highest, p3 default, p6 someday
 PRIORITY_DEFAULT = "p3"
 TL_SIDES = ["up", "down"]
+TL_MODES = ["free", "dates"]
+TL_PX_PER_DAY = 6  # dates mode: pos = days-since-1970 * this (client uses the same constant)
+TL_DATE_RE = re.compile(r"^\d{4}(-\d{2})?(-\d{2})?$")
 IMG_NAME_RE = re.compile(r"^img-[0-9a-f]{12}\.(png|jpg|gif|webp)$")
 IMG_EXTS = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
 IMG_MAX_BYTES = 10 * 1024 * 1024
@@ -370,12 +373,27 @@ def _timeline_summary(p: Path) -> dict:
             "updated": t.get("updated", ""), "entries": len(t.get("entries", []))}
 
 
+def _date_days(s: str) -> int:
+    """Days since 1970-01-01 for YYYY[-MM[-DD]] (missing parts default to 1)."""
+    parts = s.split("-")
+    y = int(parts[0])
+    m = int(parts[1]) if len(parts) > 1 else 1
+    d = int(parts[2]) if len(parts) > 2 else 1
+    try:
+        return (datetime.date(y, m, d) - datetime.date(1970, 1, 1)).days
+    except ValueError as e:
+        raise StorageError(f"invalid date {s!r}: {e}") from e
+
+
 def validate_timeline(t: dict) -> None:
     if not isinstance(t, dict) or not isinstance(t.get("entries"), list):
         raise StorageError("timeline must be an object with an 'entries' array "
                            f"(schema {TL_SCHEMA})")
     if not isinstance(t.get("title"), str) or not t["title"]:
         raise StorageError("timeline 'title' is required")
+    if t.get("mode", "free") not in TL_MODES:
+        raise StorageError(f"timeline mode must be one of {TL_MODES} "
+                           "(free = arbitrary positions, dates = placed by entry date)")
     ids = [e.get("id") for e in t["entries"]]
     for i in ids:
         check_slug("entry id", i)
@@ -396,6 +414,12 @@ def validate_timeline(t: dict) -> None:
             raise StorageError(f"entry {e['id']!r}: 'image' must be a stored image name "
                                "(img-<hash>.<ext>) — upload via the portal or pass "
                                "image_path to upsert_timeline_entry")
+        dt = e.get("date")
+        if dt is not None:
+            if not isinstance(dt, str) or not TL_DATE_RE.match(dt):
+                raise StorageError(f"entry {e['id']!r}: date must be YYYY, YYYY-MM or "
+                                   f"YYYY-MM-DD (got {dt!r})")
+            _date_days(dt)  # calendar validity
 
 
 def get_timeline(project: str, timeline_id: str) -> dict:
@@ -412,6 +436,11 @@ def save_timeline(project: str, timeline_id: str, t: dict) -> dict:
     t.setdefault("schema", TL_SCHEMA)
     t["project"], t["timeline"] = project, timeline_id
     validate_timeline(t)
+    if t.get("mode", "free") == "dates":
+        # canonical: dated entries sit exactly where their date maps
+        for e in t["entries"]:
+            if e.get("date"):
+                e["pos"] = _date_days(e["date"]) * TL_PX_PER_DAY
     t["updated"] = _today()
     path = _timeline_path(project, timeline_id, must_exist=False)
     _atomic_write(path, json.dumps(t, indent=2, ensure_ascii=False) + "\n")
@@ -419,13 +448,14 @@ def save_timeline(project: str, timeline_id: str, t: dict) -> dict:
             "entries": len(t["entries"]), "version": path.stat().st_mtime_ns}
 
 
-def create_timeline(project: str, timeline_id: str, title: str, description: str = "") -> dict:
+def create_timeline(project: str, timeline_id: str, title: str, description: str = "",
+                    mode: str = "free") -> dict:
     p = _timeline_path(project, timeline_id, must_exist=False)
     if p.exists():
         raise StorageError(f"timeline {timeline_id!r} already exists in {project!r}")
     return save_timeline(project, timeline_id, {
         "schema": TL_SCHEMA, "project": project, "timeline": timeline_id,
-        "title": title, "description": description, "entries": [],
+        "title": title, "description": description, "mode": mode, "entries": [],
     })
 
 
@@ -471,7 +501,7 @@ def timeline_image_path(project: str, timeline_id: str, name: str) -> Path:
 
 
 def upsert_timeline_entry(project: str, timeline_id: str, entry_id: str, *, title=None,
-                          text=None, pos=None, side=None, label=None,
+                          text=None, pos=None, side=None, label=None, date=None,
                           image_path=None) -> dict:
     t = get_timeline(project, timeline_id)
     check_slug("entry id", entry_id)
@@ -481,6 +511,8 @@ def upsert_timeline_entry(project: str, timeline_id: str, entry_id: str, *, titl
         if pos is None:
             pos = max((e["pos"] for e in t["entries"]), default=0) + 260
         entry = {"id": entry_id, "pos": pos, "side": side or "down"}
+        if t.get("mode", "free") == "dates" and date is None:
+            date = _today()  # dated timelines need a date; caller can move it after
         t["entries"].append(entry)
     if title is not None:
         entry["title"] = title
@@ -488,6 +520,8 @@ def upsert_timeline_entry(project: str, timeline_id: str, entry_id: str, *, titl
         entry["text"] = text
     if label is not None:
         entry["label"] = label
+    if date is not None:
+        entry["date"] = date
     if pos is not None:
         entry["pos"] = pos
     if side is not None:
@@ -525,7 +559,7 @@ def dump_timeline_text(t: dict) -> str:
     if t.get("description"):
         lines.append(" ".join(t["description"].split()))
     for e in sorted(t["entries"], key=lambda x: x.get("pos", 0)):
-        s = f'@{round(e.get("pos", 0))}'
+        s = f'@{e["date"]}' if e.get("date") else f'@{round(e.get("pos", 0))}'
         if e.get("label"):
             s += f' [{e["label"]}]'
         if e.get("title"):

@@ -189,10 +189,13 @@ def unlink_nodes(project: str, map_id: str, from_id: str, to_id: str) -> dict:
 
 
 @mcp.tool()
-def create_timeline(project: str, timeline_id: str, title: str, description: str = "") -> dict:
+def create_timeline(project: str, timeline_id: str, title: str, description: str = "",
+                    mode: str = "free") -> dict:
     """Create a new empty timeline board — a horizontal line with text/image entries.
+    mode: 'free' = entries sit at arbitrary positions; 'dates' = each entry has a
+    date (YYYY[-MM[-DD]]) and is placed on a linear date scale with axis ticks.
     View at /timeline/<project>/<timeline_id> on the portal."""
-    return storage.create_timeline(project, timeline_id, title, description)
+    return storage.create_timeline(project, timeline_id, title, description, mode)
 
 
 @mcp.tool()
@@ -213,14 +216,17 @@ def delete_timeline(project: str, timeline_id: str) -> dict:
 def upsert_timeline_entry(project: str, timeline_id: str, entry_id: str,
                           title: str | None = None, text: str | None = None,
                           pos: float | None = None, side: str | None = None,
-                          label: str | None = None, image_path: str | None = None) -> dict:
-    """Create or update a timeline entry. pos = position along the line (px at zoom 1,
-    left→right; omit on create to append after the last entry). side: up|down.
-    label = short tick caption (e.g. a date). image_path = local file to attach —
-    it is copied into the timeline's image store."""
+                          label: str | None = None, date: str | None = None,
+                          image_path: str | None = None) -> dict:
+    """Create or update a timeline entry. On a 'dates' timeline pass date
+    (YYYY, YYYY-MM or YYYY-MM-DD) — position is derived from it (pos is ignored
+    there; new entries default to today). On a 'free' timeline use pos (px at
+    zoom 1, left→right; omit on create to append after the last entry).
+    side: up|down. label = short tick caption. image_path = local file to
+    attach — it is copied into the timeline's image store."""
     return storage.upsert_timeline_entry(project, timeline_id, entry_id, title=title,
                                          text=text, pos=pos, side=side, label=label,
-                                         image_path=image_path)
+                                         date=date, image_path=image_path)
 
 
 @mcp.tool()

@@ -38,6 +38,9 @@ header{display:flex;align-items:center;gap:14px;padding:0 16px;height:52px;flex:
 .edot{position:absolute;width:9px;height:9px;border-radius:50%;background:var(--link);box-shadow:0 0 10px var(--link);pointer-events:none;z-index:1}
 .estem{position:absolute;width:1px;background:color-mix(in srgb,var(--link) 45%,transparent);pointer-events:none}
 .elabel{position:absolute;font:500 9.5px/1 var(--mono);letter-spacing:.08em;color:var(--text-3);transform:translateX(-50%);pointer-events:none;white-space:nowrap}
+#ticks{position:absolute;inset:0;pointer-events:none}
+.tick{position:absolute;width:1px;background:var(--line-2)}
+.ticklab{position:absolute;transform:translateX(-50%);font:400 9px/1 var(--mono);letter-spacing:.05em;color:var(--text-3);white-space:nowrap}
 .ecard{position:absolute;width:250px;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);border-radius:10px;padding:10px 12px 9px;box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 8px 20px -14px #000;touch-action:none;user-select:none}
 .ecard:hover{border-color:var(--line-2)}
 .ecard.moving{z-index:3;border-color:var(--link);cursor:grabbing}
@@ -70,10 +73,11 @@ header{display:flex;align-items:center;gap:14px;padding:0 16px;height:52px;flex:
   <a class="home" href="/">⌂ boards</a>
   <div class="brand"><span class="mark"></span><div class="hgroup"><span class="proj" id="proj"></span><h1 id="tl-title"></h1></div></div>
   <div class="spacer"></div>
-  <div class="tools"><button id="zo" title="Zoom out">−</button><button class="zoom" id="zl" title="Zoom">100%</button><button id="zi" title="Zoom in">+</button><button id="fit" title="Fit all entries">⤢</button><button id="addbtn" title="Add entry at center">＋ entry</button></div>
+  <div class="tools"><button id="zo" title="Zoom out">−</button><button class="zoom" id="zl" title="Zoom">100%</button><button id="zi" title="Zoom in">+</button><button id="fit" title="Fit all entries">⤢</button><button id="modebtn" title="Toggle scale: free = drag anywhere · dates = entries placed by their date on a linear axis">free</button><button id="addbtn" title="Add entry at center">＋ entry</button></div>
   <div class="savebar"><span id="stat">loading…</span><button id="copyj" title="Copy timeline JSON">copy</button><button id="dlj" title="Download timeline JSON">json</button></div>
 </header>
 <div id="stage">
+  <div id="ticks"></div>
   <div id="axis"></div>
   <div id="emptyhint">double-click the line<br>to add your first entry</div>
   <div id="tip">double-click to add · drag a card along the line<br>drag across the line to flip side · scroll to zoom</div>
@@ -93,17 +97,31 @@ let saveTimer = 0, saving = false, again = false, unsaved = false, ver = null;
 const mid = () => stage.getBoundingClientRect().height / 2;
 const inField = () => ["INPUT", "TEXTAREA", "SELECT"].includes((document.activeElement || {}).tagName);
 
+/* dates mode: pos = days-since-1970 * PXD (matches the server constant) */
+const PXD = 6;
+const DATE_RE = /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?$/;
+const parseDays = s => {
+  const m = DATE_RE.exec((s || "").trim());
+  if (!m) return null;
+  const t = Date.UTC(+m[1], m[2] ? +m[2] - 1 : 0, m[3] ? +m[3] : 1);
+  return isNaN(t) ? null : Math.round(t / 86400000);
+};
+const iso = days => new Date(days * 86400000).toISOString().slice(0, 10);
+const mode = () => DATA.mode || "free";
+
 /* ---------------- persistence ---------------- */
 function setStat(t, cls) { const s = el("stat"); s.textContent = t; s.className = cls || ""; }
 function serialize() {
   return {
     schema: DATA.schema || "thoughtboard-timeline/v1", project: PROJ, timeline: TLID,
     title: DATA.title, description: DATA.description || "", updated: DATA.updated,
+    mode: mode(),
     entries: DATA.entries.map(e => {
       const o = { id: e.id, pos: Math.round(e.pos), side: e.side || "down" };
       if (e.title) o.title = e.title;
       if (e.text) o.text = e.text;
       if (e.label) o.label = e.label;
+      if (e.date) o.date = e.date;
       if (e.image) o.image = e.image;
       return o;
     })
@@ -172,16 +190,77 @@ function apply() {
     }
     d.stem.style.left = x + "px";
     d.lab.style.left = x + "px";
-    d.lab.textContent = e.label || "";
+    d.lab.textContent = mode() === "dates" ? (e.date || "") : (e.label || "");
   });
   el("zl").textContent = Math.round(k * 100) + "%";
   el("emptyhint").style.display = DATA.entries.length ? "none" : "grid";
+  renderTicks();
+}
+const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function renderTicks() {
+  const tk = el("ticks"); tk.textContent = "";
+  if (mode() !== "dates") return;
+  const r = stage.getBoundingClientRect(), m = mid();
+  const pxday = PXD * k;
+  const d0 = Math.floor((0 - tx) / pxday), d1 = Math.ceil((r.width - tx) / pxday);
+  if (!isFinite(d0) || !isFinite(d1) || d1 - d0 > 400000) return;
+  const put = (days, label, major) => {
+    const x = days * pxday + tx;
+    const t = document.createElement("div"); t.className = "tick";
+    t.style.left = x + "px"; t.style.top = (m + 2) + "px"; t.style.height = (major ? 11 : 6) + "px";
+    tk.appendChild(t);
+    if (label) {
+      const l = document.createElement("div"); l.className = "ticklab";
+      l.style.left = x + "px"; l.style.top = (m + 17) + "px"; l.textContent = label;
+      tk.appendChild(l);
+    }
+  };
+  if (pxday >= 42) { // days
+    for (let d = d0; d <= d1; d++) {
+      const dt = new Date(d * 86400000);
+      put(d, dt.getUTCDate() === 1 ? MON[dt.getUTCMonth()] + " 1" : String(dt.getUTCDate()), dt.getUTCDate() === 1);
+    }
+  } else if (pxday * 7 >= 40) { // weeks (Mondays)
+    for (let d = d0; d <= d1; d++) {
+      const dt = new Date(d * 86400000);
+      if (dt.getUTCDay() === 1) put(d, MON[dt.getUTCMonth()] + " " + dt.getUTCDate(), dt.getUTCDate() <= 7);
+    }
+  } else if (pxday * 30 >= 44) { // months
+    let dt = new Date(d0 * 86400000);
+    dt = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), 1));
+    while (dt.getTime() / 86400000 <= d1) {
+      const d = Math.round(dt.getTime() / 86400000);
+      put(d, dt.getUTCMonth() === 0 ? String(dt.getUTCFullYear()) : MON[dt.getUTCMonth()], dt.getUTCMonth() === 0);
+      dt = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 1));
+    }
+  } else { // years, stepped so labels never collide
+    const step = Math.max(1, Math.ceil(64 / (pxday * 365.25)));
+    let y = new Date(d0 * 86400000).getUTCFullYear();
+    y -= ((y % step) + step) % step;
+    for (;;) {
+      const d = Date.UTC(y, 0, 1) / 86400000;
+      if (d > d1) break;
+      if (d >= d0) put(d, String(y), true);
+      y += step;
+    }
+  }
 }
 function makeEntry(e) {
   const card = document.createElement("div"); card.className = "ecard";
-  const lab = document.createElement("input"); lab.className = "f-label"; lab.placeholder = "label / date"; lab.value = e.label || ""; lab.spellcheck = false;
-  lab.addEventListener("input", () => { e.label = lab.value; apply(); });
-  lab.addEventListener("change", dirty);
+  const lab = document.createElement("input"); lab.className = "f-label"; lab.spellcheck = false;
+  if (mode() === "dates") {
+    lab.placeholder = "YYYY-MM-DD"; lab.value = e.date || "";
+    lab.addEventListener("change", () => {
+      const d = parseDays(lab.value);
+      if (d === null) { lab.value = e.date || ""; return; } // invalid → revert
+      e.date = lab.value.trim(); e.pos = d * PXD;
+      apply(); dirty();
+    });
+  } else {
+    lab.placeholder = "label / date"; lab.value = e.label || "";
+    lab.addEventListener("input", () => { e.label = lab.value; apply(); });
+    lab.addEventListener("change", dirty);
+  }
   const ti = document.createElement("input"); ti.className = "f-title"; ti.placeholder = "Title"; ti.value = e.title || ""; ti.spellcheck = false;
   ti.addEventListener("input", () => { e.title = ti.value; });
   ti.addEventListener("change", dirty);
@@ -241,7 +320,15 @@ function makeEntry(e) {
   card.addEventListener("pointerup", () => {
     if (!dragEnt || dragEnt.e !== e) return;
     card.classList.remove("moving");
-    if (dragEnt.moved) dirty();
+    if (dragEnt.moved) {
+      if (mode() === "dates") { // snap to the day under the drop point
+        const d = Math.round(e.pos / PXD);
+        e.date = iso(d); e.pos = d * PXD;
+        const li = card.querySelector(".f-label"); if (li) li.value = e.date;
+        apply();
+      }
+      dirty();
+    }
     dragEnt = null;
   });
   const stem = document.createElement("div"); stem.className = "estem";
@@ -257,6 +344,7 @@ function rebuild() {
   el("proj").textContent = PROJ;
   el("tl-title").textContent = DATA.title;
   document.title = DATA.title + " — ThoughtBoard";
+  updateModeBtn();
   apply();
 }
 
@@ -268,6 +356,7 @@ function genId() {
 }
 function addEntry(pos, side) {
   const e = { id: genId(), pos, side: side || "down", title: "", text: "" };
+  if (mode() === "dates") { const d = Math.round(pos / PXD); e.date = iso(d); e.pos = d * PXD; }
   DATA.entries.push(e);
   rebuild(); dirty();
   const ti = dom[e.id].card.querySelector(".f-title");
@@ -281,6 +370,25 @@ stage.addEventListener("dblclick", e => {
 el("addbtn").addEventListener("click", () => {
   const r = stage.getBoundingClientRect();
   addEntry((r.width / 2 - tx) / k, "down");
+});
+function updateModeBtn() { el("modebtn").textContent = mode() === "dates" ? "dates" : "free"; }
+el("modebtn").addEventListener("click", () => {
+  if (mode() === "free") {
+    if (!confirm("Switch to a date scale? Each entry gets a date — taken from its label if that looks like a date, else assigned from today onward — and is re-placed on a linear date axis.")) return;
+    const today = Math.floor(Date.now() / 86400000);
+    DATA.entries.slice().sort((a, b) => a.pos - b.pos).forEach((e, idx) => {
+      let src = null;
+      if (parseDays(e.date) !== null) src = e.date.trim();
+      else if (parseDays(e.label) !== null) src = e.label.trim();
+      else src = iso(today + idx);
+      e.date = src;
+      e.pos = parseDays(src) * PXD;
+    });
+    DATA.mode = "dates";
+  } else {
+    DATA.mode = "free"; // positions keep their last date-derived spots; dates are kept but ignored
+  }
+  updateModeBtn(); rebuild(); fit(); dirty();
 });
 
 /* ---------------- pan + zoom + pinch ---------------- */
@@ -371,6 +479,7 @@ el("dlj").addEventListener("click", () => {
     setStat("load failed", "bad");
     return;
   }
+  updateModeBtn();
   rebuild(); fit();
   setStat("saved " + (DATA.updated || ""));
 })();
