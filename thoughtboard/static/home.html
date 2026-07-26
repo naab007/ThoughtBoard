@@ -90,6 +90,21 @@ async function load() {
       li.appendChild(a); ml.appendChild(li);
     });
     card.appendChild(ml);
+    const tls = p.timelines || [];
+    if (tls.length) {
+      card.appendChild(el('div', 'sec', 'Timelines'));
+      const tl = el('ul');
+      tls.forEach(t => {
+        const li = el('li'), a = el('a');
+        a.href = '/timeline/' + p.slug + '/' + t.id;
+        const i = el('i'); i.className = 'r';
+        a.appendChild(i);
+        a.appendChild(el('span', 'nm', t.title));
+        a.appendChild(el('span', 'meta', t.entries + ' entries · ' + (t.updated || '')));
+        li.appendChild(a); tl.appendChild(li);
+      });
+      card.appendChild(tl);
+    }
     if (p.research.length) {
       card.appendChild(el('div', 'sec', 'Research'));
       const rl = el('ul');
@@ -103,8 +118,8 @@ async function load() {
       card.appendChild(rl);
     }
     const row = el('div', 'newrow');
-    const mid = el('input'); mid.placeholder = 'map-slug'; mid.style.width = '120px';
-    const mti = el('input'); mti.placeholder = 'Map title'; mti.style.flex = '1';
+    const mid = el('input'); mid.placeholder = 'slug'; mid.style.width = '110px';
+    const mti = el('input'); mti.placeholder = 'Title'; mti.style.flex = '1';
     const go = el('button', 'btn', '＋ Map');
     go.addEventListener('click', async () => {
       try {
@@ -113,7 +128,15 @@ async function load() {
         load();
       } catch (e) { err(String(e.message || e)); }
     });
-    row.append(mid, mti, go); card.appendChild(row);
+    const goT = el('button', 'btn', '＋ Timeline');
+    goT.addEventListener('click', async () => {
+      try {
+        await api('/api/projects/' + p.slug + '/timelines',
+          { method: 'POST', body: JSON.stringify({ id: mid.value.trim(), title: mti.value.trim() }) });
+        load();
+      } catch (e) { err(String(e.message || e)); }
+    });
+    row.append(mid, mti, go, goT); card.appendChild(row);
     grid.appendChild(card);
   });
 }

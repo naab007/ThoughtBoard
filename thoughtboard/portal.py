@@ -107,6 +107,12 @@ def build_app(port: int = PORT_DEFAULT) -> FastAPI:
         storage.check_slug("map id", map_id)
         return page("board.html")
 
+    @app.get("/timeline/{project}/{timeline_id}", response_class=HTMLResponse)
+    async def timeline_page(project: str, timeline_id: str):
+        storage.check_slug("project", project)
+        storage.check_slug("timeline id", timeline_id)
+        return page("timeline.html")
+
     @app.get("/research/{project}/{doc}", response_class=HTMLResponse)
     async def research_page(project: str, doc: str):
         text = storage.get_research(project, doc)
@@ -147,6 +153,41 @@ def build_app(port: int = PORT_DEFAULT) -> FastAPI:
     @app.put("/api/projects/{project}/maps/{map_id}")
     async def api_save_map(project: str, map_id: str, payload: dict):
         return storage.save_map(project, map_id, payload)
+
+    # ---------------------------------------------------------- timelines
+    @app.post("/api/projects/{project}/timelines")
+    async def api_create_timeline(project: str, payload: dict):
+        return storage.create_timeline(project, payload.get("id", ""),
+                                       payload.get("title", ""),
+                                       payload.get("description", ""))
+
+    @app.get("/api/projects/{project}/timelines/{timeline_id}")
+    async def api_get_timeline(project: str, timeline_id: str):
+        return storage.get_timeline(project, timeline_id)
+
+    @app.put("/api/projects/{project}/timelines/{timeline_id}")
+    async def api_save_timeline(project: str, timeline_id: str, payload: dict):
+        return storage.save_timeline(project, timeline_id, payload)
+
+    @app.get("/api/projects/{project}/timelines/{timeline_id}/version")
+    async def api_timeline_version(project: str, timeline_id: str):
+        return {"version": storage.timeline_version(project, timeline_id)}
+
+    @app.post("/api/projects/{project}/timelines/{timeline_id}/images")
+    async def api_upload_timeline_image(project: str, timeline_id: str, request: Request):
+        ct = request.headers.get("content-type", "").split(";")[0].strip().lower()
+        ext = {v: k for k, v in storage.IMG_EXTS.items()}.get(ct)
+        if not ext:
+            raise storage.StorageError(
+                f"content-type {ct!r} not supported — one of {sorted(storage.IMG_EXTS.values())}")
+        data = await request.body()
+        return {"image": storage.save_timeline_image(project, timeline_id, data, ext)}
+
+    @app.get("/tlimg/{project}/{timeline_id}/{name}")
+    async def api_timeline_image(project: str, timeline_id: str, name: str):
+        from fastapi.responses import FileResponse
+        p = storage.timeline_image_path(project, timeline_id, name)
+        return FileResponse(str(p), media_type=storage.IMG_EXTS[p.suffix.lstrip(".")])
 
     return app
 

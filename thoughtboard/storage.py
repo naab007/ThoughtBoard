@@ -21,9 +21,14 @@ import tempfile
 from pathlib import Path
 
 SCHEMA = "thoughtboard/v1"
+TL_SCHEMA = "thoughtboard-timeline/v1"
 STATUSES = ["idea", "researching", "planned", "in-progress", "done", "blocked"]
 PRIORITIES = ["p0", "p1", "p2", "p3", "p4", "p5", "p6"]  # p0 highest, p3 default, p6 someday
 PRIORITY_DEFAULT = "p3"
+TL_SIDES = ["up", "down"]
+IMG_NAME_RE = re.compile(r"^img-[0-9a-f]{12}\.(png|jpg|gif|webp)$")
+IMG_EXTS = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}
+IMG_MAX_BYTES = 10 * 1024 * 1024
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
@@ -106,6 +111,7 @@ def list_projects() -> list[dict]:
             "slug": slug,
             "title": meta.get("title", slug),
             "maps": [_map_summary(p) for p in sorted(pj.parent.glob("maps/*.json"))],
+            "timelines": [_timeline_summary(p) for p in sorted(pj.parent.glob("timelines/*.json"))],
             "research": [_research_summary(p) for p in sorted(pj.parent.glob("research/*.md"))],
         })
     return out
@@ -338,6 +344,199 @@ def unlink_nodes(project: str, map_id: str, from_id: str, to_id: str) -> dict:
         src.pop("links")
     save_map(project, map_id, m)
     return {"unlinked": f"{from_id} -> {to_id}"}
+
+
+# --------------------------------------------------------------- timelines
+
+def _timeline_path(project: str, timeline_id: str, must_exist: bool = True) -> Path:
+    d = _project_dir(project)
+    check_slug("timeline id", timeline_id)
+    p = d / "timelines" / f"{timeline_id}.json"
+    if must_exist and not p.exists():
+        have = [q.stem for q in sorted((d / "timelines").glob("*.json"))]
+        raise StorageError(
+            f"timeline {timeline_id!r} not found in project {project!r}. "
+            f"Existing timelines: {have or 'none'} — create one with create_timeline"
+        )
+    return p
+
+
+def _timeline_summary(p: Path) -> dict:
+    try:
+        t = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"id": p.stem, "title": p.stem, "updated": "", "entries": 0}
+    return {"id": p.stem, "title": t.get("title", p.stem),
+            "updated": t.get("updated", ""), "entries": len(t.get("entries", []))}
+
+
+def validate_timeline(t: dict) -> None:
+    if not isinstance(t, dict) or not isinstance(t.get("entries"), list):
+        raise StorageError("timeline must be an object with an 'entries' array "
+                           f"(schema {TL_SCHEMA})")
+    if not isinstance(t.get("title"), str) or not t["title"]:
+        raise StorageError("timeline 'title' is required")
+    ids = [e.get("id") for e in t["entries"]]
+    for i in ids:
+        check_slug("entry id", i)
+    dupes = {i for i in ids if ids.count(i) > 1}
+    if dupes:
+        raise StorageError(f"duplicate entry ids: {sorted(dupes)}")
+    for e in t["entries"]:
+        if not isinstance(e.get("pos"), (int, float)):
+            raise StorageError(f"entry {e.get('id')!r}: numeric 'pos' (position along "
+                               "the line, px at zoom 1) is required")
+        if e.get("side", "down") not in TL_SIDES:
+            raise StorageError(f"entry {e.get('id')!r}: side must be one of {TL_SIDES}")
+        for f in ("title", "text", "label"):
+            if f in e and not isinstance(e[f], str):
+                raise StorageError(f"entry {e['id']!r}: '{f}' must be a string")
+        img = e.get("image")
+        if img is not None and not IMG_NAME_RE.match(img):
+            raise StorageError(f"entry {e['id']!r}: 'image' must be a stored image name "
+                               "(img-<hash>.<ext>) — upload via the portal or pass "
+                               "image_path to upsert_timeline_entry")
+
+
+def get_timeline(project: str, timeline_id: str) -> dict:
+    p = _timeline_path(project, timeline_id)
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise StorageError(f"timeline file {p.name} is corrupt JSON: {e}") from e
+
+
+def save_timeline(project: str, timeline_id: str, t: dict) -> dict:
+    _timeline_path(project, timeline_id, must_exist=False)
+    t = dict(t)
+    t.setdefault("schema", TL_SCHEMA)
+    t["project"], t["timeline"] = project, timeline_id
+    validate_timeline(t)
+    t["updated"] = _today()
+    path = _timeline_path(project, timeline_id, must_exist=False)
+    _atomic_write(path, json.dumps(t, indent=2, ensure_ascii=False) + "\n")
+    return {"project": project, "timeline": timeline_id, "updated": t["updated"],
+            "entries": len(t["entries"]), "version": path.stat().st_mtime_ns}
+
+
+def create_timeline(project: str, timeline_id: str, title: str, description: str = "") -> dict:
+    p = _timeline_path(project, timeline_id, must_exist=False)
+    if p.exists():
+        raise StorageError(f"timeline {timeline_id!r} already exists in {project!r}")
+    return save_timeline(project, timeline_id, {
+        "schema": TL_SCHEMA, "project": project, "timeline": timeline_id,
+        "title": title, "description": description, "entries": [],
+    })
+
+
+def delete_timeline(project: str, timeline_id: str) -> dict:
+    p = _timeline_path(project, timeline_id)
+    p.unlink()
+    imgdir = p.parent / f"{timeline_id}_img"
+    if imgdir.is_dir():
+        import shutil
+        shutil.rmtree(imgdir, ignore_errors=True)
+    return {"deleted": timeline_id, "project": project}
+
+
+def timeline_version(project: str, timeline_id: str) -> int:
+    return _timeline_path(project, timeline_id).stat().st_mtime_ns
+
+
+def save_timeline_image(project: str, timeline_id: str, data: bytes, ext: str) -> str:
+    _timeline_path(project, timeline_id)  # timeline must exist
+    ext = ext.lower().lstrip(".")
+    if ext == "jpeg":
+        ext = "jpg"
+    if ext not in IMG_EXTS:
+        raise StorageError(f"image type {ext!r} not supported — one of {sorted(IMG_EXTS)}")
+    if len(data) > IMG_MAX_BYTES:
+        raise StorageError(f"image too large ({len(data)} bytes, max {IMG_MAX_BYTES})")
+    import hashlib
+    name = "img-" + hashlib.sha256(data).hexdigest()[:12] + "." + ext
+    d = _project_dir(project) / "timelines" / f"{timeline_id}_img"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_bytes(data)
+    return name
+
+
+def timeline_image_path(project: str, timeline_id: str, name: str) -> Path:
+    check_slug("timeline id", timeline_id)
+    if not IMG_NAME_RE.match(name):
+        raise StorageError("invalid image name")
+    p = _project_dir(project) / "timelines" / f"{timeline_id}_img" / name
+    if not p.exists():
+        raise StorageError(f"image {name!r} not found in timeline {timeline_id!r}")
+    return p
+
+
+def upsert_timeline_entry(project: str, timeline_id: str, entry_id: str, *, title=None,
+                          text=None, pos=None, side=None, label=None,
+                          image_path=None) -> dict:
+    t = get_timeline(project, timeline_id)
+    check_slug("entry id", entry_id)
+    entry = next((e for e in t["entries"] if e["id"] == entry_id), None)
+    creating = entry is None
+    if creating:
+        if pos is None:
+            pos = max((e["pos"] for e in t["entries"]), default=0) + 260
+        entry = {"id": entry_id, "pos": pos, "side": side or "down"}
+        t["entries"].append(entry)
+    if title is not None:
+        entry["title"] = title
+    if text is not None:
+        entry["text"] = text
+    if label is not None:
+        entry["label"] = label
+    if pos is not None:
+        entry["pos"] = pos
+    if side is not None:
+        entry["side"] = side
+    if image_path is not None:
+        src = Path(image_path)
+        if not src.is_file():
+            raise StorageError(f"image_path {image_path!r} is not a readable file")
+        entry["image"] = save_timeline_image(project, timeline_id,
+                                             src.read_bytes(), src.suffix)
+    save_timeline(project, timeline_id, t)
+    return {"entry": entry, "created": creating}
+
+
+def delete_timeline_entry(project: str, timeline_id: str, entry_id: str) -> dict:
+    t = get_timeline(project, timeline_id)
+    entry = next((e for e in t["entries"] if e["id"] == entry_id), None)
+    if entry is None:
+        raise StorageError(f"entry {entry_id!r} not found — existing: "
+                           f"{[e['id'] for e in t['entries']]}")
+    t["entries"] = [e for e in t["entries"] if e["id"] != entry_id]
+    img = entry.get("image")
+    if img and not any(e.get("image") == img for e in t["entries"]):
+        try:
+            timeline_image_path(project, timeline_id, img).unlink()
+        except StorageError:
+            pass
+    save_timeline(project, timeline_id, t)
+    return {"deleted": entry_id, "entries_left": len(t["entries"])}
+
+
+def dump_timeline_text(t: dict) -> str:
+    lines = [f'# {t.get("title", "?")} ({t.get("project", "?")}/{t.get("timeline", "?")} '
+             f'timeline) · updated {t.get("updated", "?")} · {len(t["entries"])} entries']
+    if t.get("description"):
+        lines.append(" ".join(t["description"].split()))
+    for e in sorted(t["entries"], key=lambda x: x.get("pos", 0)):
+        s = f'@{round(e.get("pos", 0))}'
+        if e.get("label"):
+            s += f' [{e["label"]}]'
+        if e.get("title"):
+            s += " " + e["title"]
+        txt = " ".join((e.get("text") or "").split())
+        if txt:
+            s += f" — {txt}"
+        if e.get("image"):
+            s += f' | img: {e["image"]}'
+        lines.append(f'{e["id"]}: {s}')
+    return "\n".join(lines)
 
 
 # -------------------------------------------------------------------- dump

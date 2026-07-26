@@ -134,6 +134,8 @@ def dump_board(project: str, map_id: str | None = None) -> str:
             f"{[p['slug'] for p in storage.list_projects()] or 'none'}")
     for m in proj["maps"]:
         parts.append(storage.dump_map_text(storage.get_map(project, m["id"])))
+    for t in proj.get("timelines", []):
+        parts.append(storage.dump_timeline_text(storage.get_timeline(project, t["id"])))
     if proj["research"]:
         parts.append("research docs (read with get_research): "
                      + ", ".join(f'{r["doc"]} "{r["title"]}"' for r in proj["research"]))
@@ -184,6 +186,47 @@ def link_nodes(project: str, map_id: str, from_id: str, to_id: str, label: str =
 def unlink_nodes(project: str, map_id: str, from_id: str, to_id: str) -> dict:
     """Remove a cross-link."""
     return storage.unlink_nodes(project, map_id, from_id, to_id)
+
+
+@mcp.tool()
+def create_timeline(project: str, timeline_id: str, title: str, description: str = "") -> dict:
+    """Create a new empty timeline board — a horizontal line with text/image entries.
+    View at /timeline/<project>/<timeline_id> on the portal."""
+    return storage.create_timeline(project, timeline_id, title, description)
+
+
+@mcp.tool()
+def get_timeline(project: str, timeline_id: str) -> dict:
+    """Read a full timeline (thoughtboard-timeline/v1: entries with id/pos/side/
+    title/text/label/image). For a cheap read use dump_board(project) which
+    includes timelines as text."""
+    return storage.get_timeline(project, timeline_id)
+
+
+@mcp.tool()
+def delete_timeline(project: str, timeline_id: str) -> dict:
+    """Delete a timeline and its stored images permanently."""
+    return storage.delete_timeline(project, timeline_id)
+
+
+@mcp.tool()
+def upsert_timeline_entry(project: str, timeline_id: str, entry_id: str,
+                          title: str | None = None, text: str | None = None,
+                          pos: float | None = None, side: str | None = None,
+                          label: str | None = None, image_path: str | None = None) -> dict:
+    """Create or update a timeline entry. pos = position along the line (px at zoom 1,
+    left→right; omit on create to append after the last entry). side: up|down.
+    label = short tick caption (e.g. a date). image_path = local file to attach —
+    it is copied into the timeline's image store."""
+    return storage.upsert_timeline_entry(project, timeline_id, entry_id, title=title,
+                                         text=text, pos=pos, side=side, label=label,
+                                         image_path=image_path)
+
+
+@mcp.tool()
+def delete_timeline_entry(project: str, timeline_id: str, entry_id: str) -> dict:
+    """Delete a timeline entry (its image is removed too if nothing else uses it)."""
+    return storage.delete_timeline_entry(project, timeline_id, entry_id)
 
 
 @mcp.tool()

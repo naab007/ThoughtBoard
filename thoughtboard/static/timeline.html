@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timeline — ThoughtBoard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#08090b;--bg-2:#0c0e12;--panel:#10131a;--panel-2:#151922;--line:rgba(255,255,255,.075);--line-2:rgba(255,255,255,.14);--text:#e8ebf1;--text-2:#98a1b2;--text-3:#606a7b;--accent:oklch(.78 .1 215);--accent-dim:oklch(.78 .1 215/.16);--link:oklch(.75 .11 300);--bad:oklch(.72 .12 25);--mono:"IBM Plex Mono",ui-monospace,monospace}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.5 "IBM Plex Sans",system-ui,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+input,textarea{font:inherit;color:var(--text)}
+header{display:flex;align-items:center;gap:14px;padding:0 16px;height:52px;flex:0 0 auto;background:linear-gradient(180deg,var(--panel-2),var(--panel));border-bottom:1px solid var(--line);position:relative;z-index:3}
+.home{font:500 10.5px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);text-decoration:none}
+.home:hover{color:var(--text)}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand .mark{width:9px;height:9px;border-radius:2px;background:var(--link);box-shadow:0 0 12px var(--link);flex:0 0 auto}
+.brand .proj{font:500 11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--text-3)}
+.brand h1{font-size:14.5px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hgroup{display:flex;flex-direction:column;gap:3px;min-width:0}
+.spacer{flex:1}
+.tools{display:flex;align-items:center;gap:2px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:2px}
+.tools button{display:grid;place-items:center;min-width:28px;height:26px;padding:0 8px;border-radius:6px;color:var(--text-2);font:500 11px/1 var(--mono)}
+.tools button:hover{background:var(--panel-2);color:var(--text)}
+.tools .zoom{width:46px;font-size:11px;color:var(--text-3)}
+.savebar{display:flex;align-items:center;gap:2px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:2px}
+.savebar button{padding:5px 9px;border-radius:6px;font:500 10.5px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)}
+.savebar button:hover{background:var(--panel-2);color:var(--text)}
+#stat{padding:0 9px;font:500 10px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);white-space:nowrap}
+#stat.busy{color:oklch(.79 .11 75)}
+#stat.bad{color:var(--bad)}
+#stage{flex:1;position:relative;overflow:hidden;cursor:grab;touch-action:none;background:radial-gradient(circle at 1px 1px,rgba(255,255,255,.055) 1px,transparent 0) 0 0/26px 26px,radial-gradient(120% 90% at 30% 0,#0d1016 0,var(--bg) 70%)}
+#stage.dragging{cursor:grabbing}
+#stage::after{content:"";position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 140px 30px rgba(0,0,0,.55)}
+#axis{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--line-2) 6%,var(--line-2) 94%,transparent);pointer-events:none}
+.edot{position:absolute;width:9px;height:9px;border-radius:50%;background:var(--link);box-shadow:0 0 10px var(--link);pointer-events:none;z-index:1}
+.estem{position:absolute;width:1px;background:color-mix(in srgb,var(--link) 45%,transparent);pointer-events:none}
+.elabel{position:absolute;font:500 9.5px/1 var(--mono);letter-spacing:.08em;color:var(--text-3);transform:translateX(-50%);pointer-events:none;white-space:nowrap}
+.ecard{position:absolute;width:250px;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);border-radius:10px;padding:10px 12px 9px;box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 8px 20px -14px #000;touch-action:none;user-select:none}
+.ecard:hover{border-color:var(--line-2)}
+.ecard.moving{z-index:3;border-color:var(--link);cursor:grabbing}
+.ecard .f-label{width:100%;background:none;border:1px solid transparent;border-radius:5px;padding:2px 5px;font:500 9.5px/1.4 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--link);outline:0}
+.ecard .f-label::placeholder{color:var(--text-3);text-transform:none;letter-spacing:.04em}
+.ecard .f-title{width:100%;margin-top:2px;background:none;border:1px solid transparent;border-radius:6px;padding:3px 5px;font-size:13.5px;font-weight:600;letter-spacing:-.01em;outline:0}
+.ecard .f-title:hover,.ecard .f-label:hover{border-color:var(--line)}
+.ecard .f-title:focus,.ecard .f-label:focus,.ecard .f-text:focus{border-color:var(--accent);background:var(--bg-2)}
+.ecard .f-title::placeholder{color:var(--text-3)}
+.ecard .f-text{width:100%;margin-top:4px;min-height:44px;resize:vertical;background:none;border:1px solid transparent;border-radius:6px;padding:4px 5px;font-size:12px;line-height:1.5;color:#c6cddb;outline:0;font-family:"IBM Plex Sans",sans-serif}
+.ecard .f-text:hover{border-color:var(--line)}
+.ecard .f-text::placeholder{color:var(--text-3)}
+.ecard img{display:block;width:100%;max-height:150px;object-fit:contain;margin-top:6px;border-radius:7px;background:var(--bg-2);border:1px solid var(--line);cursor:zoom-in}
+.ecard .foot{display:flex;align-items:center;gap:4px;margin-top:7px}
+.ecard .foot button{padding:4px 8px;border:1px solid var(--line);border-radius:6px;font:500 9.5px/1.3 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--text-2)}
+.ecard .foot button:hover{border-color:var(--accent);color:var(--text)}
+.ecard .foot .del{margin-left:auto}
+.ecard .foot .del:hover{border-color:var(--bad);color:var(--bad)}
+#tip{position:absolute;right:14px;bottom:14px;font:400 10.5px/1.6 var(--mono);color:var(--text-3);text-align:right;pointer-events:none}
+#emptyhint{position:absolute;inset:0;display:none;place-items:center;font:500 11px/1.8 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);pointer-events:none;text-align:center}
+#lightbox{position:fixed;inset:0;display:none;place-items:center;background:rgba(0,0,0,.82);z-index:9;cursor:zoom-out}
+#lightbox.open{display:grid}
+#lightbox img{max-width:92vw;max-height:92vh;border-radius:10px}
+@media (pointer:coarse){.tools button{min-width:36px;height:34px}.savebar button{padding:9px 11px}.ecard .foot button{padding:8px 11px}}
+@media (max-width:700px){#tip{display:none}.brand .proj{display:none}header{gap:8px;padding:0 10px}}
+</style>
+</head>
+<body>
+<header>
+  <a class="home" href="/">⌂ boards</a>
+  <div class="brand"><span class="mark"></span><div class="hgroup"><span class="proj" id="proj"></span><h1 id="tl-title"></h1></div></div>
+  <div class="spacer"></div>
+  <div class="tools"><button id="zo" title="Zoom out">−</button><button class="zoom" id="zl" title="Zoom">100%</button><button id="zi" title="Zoom in">+</button><button id="fit" title="Fit all entries">⤢</button><button id="addbtn" title="Add entry at center">＋ entry</button></div>
+  <div class="savebar"><span id="stat">loading…</span><button id="copyj" title="Copy timeline JSON">copy</button><button id="dlj" title="Download timeline JSON">json</button></div>
+</header>
+<div id="stage">
+  <div id="axis"></div>
+  <div id="emptyhint">double-click the line<br>to add your first entry</div>
+  <div id="tip">double-click to add · drag a card along the line<br>drag across the line to flip side · scroll to zoom</div>
+</div>
+<div id="lightbox"><img id="lightbox-img" alt=""></div>
+<script>
+const [, , PROJ, TLID] = location.pathname.split("/");
+const API = "/api/projects/" + PROJ + "/timelines/" + TLID;
+const el = id => document.getElementById(id);
+const stage = el("stage");
+const CARD_W = 250, STEM = 46;
+
+let DATA = null, dom = {}, k = 1, tx = 0;
+let dragEnt = null, panning = false, sx = 0, moved = false;
+let saveTimer = 0, saving = false, again = false, unsaved = false, ver = null;
+
+const mid = () => stage.getBoundingClientRect().height / 2;
+const inField = () => ["INPUT", "TEXTAREA", "SELECT"].includes((document.activeElement || {}).tagName);
+
+/* ---------------- persistence ---------------- */
+function setStat(t, cls) { const s = el("stat"); s.textContent = t; s.className = cls || ""; }
+function serialize() {
+  return {
+    schema: DATA.schema || "thoughtboard-timeline/v1", project: PROJ, timeline: TLID,
+    title: DATA.title, description: DATA.description || "", updated: DATA.updated,
+    entries: DATA.entries.map(e => {
+      const o = { id: e.id, pos: Math.round(e.pos), side: e.side || "down" };
+      if (e.title) o.title = e.title;
+      if (e.text) o.text = e.text;
+      if (e.label) o.label = e.label;
+      if (e.image) o.image = e.image;
+      return o;
+    })
+  };
+}
+function dirty() { unsaved = true; setStat("unsaved", "busy"); clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 600); }
+async function saveNow() {
+  if (saving) { again = true; return; }
+  saving = true; setStat("saving…", "busy");
+  try {
+    const r = await fetch(API, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(serialize()) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    DATA.updated = j.updated;
+    if (j.version) ver = j.version;
+    unsaved = false;
+    setStat("saved " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+  } catch (e) {
+    setStat("save failed — retrying", "bad");
+    clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 3000);
+  } finally {
+    saving = false;
+    if (again) { again = false; saveNow(); }
+  }
+}
+async function pollVersion() {
+  let j;
+  try {
+    const r = await fetch(API + "/version");
+    if (!r.ok) return;
+    j = await r.json();
+  } catch (e) { return; }
+  if (ver === null || j.version === ver) { if (ver === null) ver = j.version; return; }
+  if (saving || unsaved) { ver = j.version; return; }
+  if (dragEnt || inField()) return;
+  ver = j.version;
+  try {
+    const r2 = await fetch(API);
+    if (!r2.ok) return;
+    DATA = await r2.json();
+  } catch (e) { return; }
+  rebuild();
+  setStat("synced " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+}
+setInterval(pollVersion, 2000);
+
+/* ---------------- rendering ---------------- */
+function apply() {
+  const m = mid();
+  el("axis").style.top = (m - 1) + "px";
+  DATA.entries.forEach(e => {
+    const d = dom[e.id];
+    if (!d) return;
+    const x = e.pos * k + tx;
+    d.dot.style.left = (x - 4.5) + "px"; d.dot.style.top = (m - 4.5) + "px";
+    d.card.style.left = (x - CARD_W / 2) + "px";
+    const h = d.card.offsetHeight;
+    if ((e.side || "down") === "up") {
+      d.card.style.top = (m - STEM - h) + "px";
+      d.stem.style.top = (m - STEM) + "px"; d.stem.style.height = STEM + "px";
+      d.lab.style.top = (m + 10) + "px";
+    } else {
+      d.card.style.top = (m + STEM) + "px";
+      d.stem.style.top = m + "px"; d.stem.style.height = STEM + "px";
+      d.lab.style.top = (m - 22) + "px";
+    }
+    d.stem.style.left = x + "px";
+    d.lab.style.left = x + "px";
+    d.lab.textContent = e.label || "";
+  });
+  el("zl").textContent = Math.round(k * 100) + "%";
+  el("emptyhint").style.display = DATA.entries.length ? "none" : "grid";
+}
+function makeEntry(e) {
+  const card = document.createElement("div"); card.className = "ecard";
+  const lab = document.createElement("input"); lab.className = "f-label"; lab.placeholder = "label / date"; lab.value = e.label || ""; lab.spellcheck = false;
+  lab.addEventListener("input", () => { e.label = lab.value; apply(); });
+  lab.addEventListener("change", dirty);
+  const ti = document.createElement("input"); ti.className = "f-title"; ti.placeholder = "Title"; ti.value = e.title || ""; ti.spellcheck = false;
+  ti.addEventListener("input", () => { e.title = ti.value; });
+  ti.addEventListener("change", dirty);
+  const tx2 = document.createElement("textarea"); tx2.className = "f-text"; tx2.placeholder = "Text…"; tx2.value = e.text || "";
+  tx2.addEventListener("change", () => { e.text = tx2.value; dirty(); });
+  card.append(lab, ti, tx2);
+  if (e.image) {
+    const img = document.createElement("img"); img.src = "/tlimg/" + PROJ + "/" + TLID + "/" + e.image; img.alt = e.title || "";
+    img.addEventListener("click", ev => { ev.stopPropagation(); el("lightbox-img").src = img.src; el("lightbox").classList.add("open"); });
+    card.appendChild(img);
+  }
+  const foot = document.createElement("div"); foot.className = "foot";
+  const file = document.createElement("input"); file.type = "file"; file.accept = "image/png,image/jpeg,image/gif,image/webp"; file.style.display = "none";
+  file.addEventListener("change", async () => {
+    const f = file.files[0];
+    if (!f) return;
+    try {
+      const r = await fetch(API + "/images", { method: "POST", headers: { "Content-Type": f.type }, body: f });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.statusText);
+      e.image = j.image;
+      rebuild(); dirty();
+    } catch (err) { setStat("image upload failed", "bad"); }
+  });
+  const pic = document.createElement("button"); pic.textContent = e.image ? "replace img" : "＋ image";
+  pic.addEventListener("click", ev => { ev.stopPropagation(); file.click(); });
+  const del = document.createElement("button"); del.className = "del"; del.textContent = "✕";
+  del.addEventListener("click", ev => {
+    ev.stopPropagation();
+    if (!confirm("Delete this entry?")) return;
+    DATA.entries = DATA.entries.filter(x => x.id !== e.id);
+    rebuild(); dirty();
+  });
+  foot.append(pic, file, del);
+  card.appendChild(foot);
+  /* drag along the line (not from inputs/buttons) */
+  card.addEventListener("pointerdown", ev => {
+    ev.stopPropagation();
+    if (["INPUT", "TEXTAREA", "BUTTON", "IMG"].includes(ev.target.tagName)) return;
+    dragEnt = { e, sx: ev.clientX, p0: e.pos, moved: false };
+    card.classList.add("moving");
+    try { card.setPointerCapture(ev.pointerId); } catch (err) {}
+  });
+  card.addEventListener("pointermove", ev => {
+    if (!dragEnt || dragEnt.e !== e) return;
+    if (!dragEnt.moved && Math.abs(ev.clientX - dragEnt.sx) < 4 && true) {
+      const r = stage.getBoundingClientRect();
+      const overLine = (e.side === "up") !== (ev.clientY - r.top < mid());
+      if (!overLine) return;
+    }
+    dragEnt.moved = true;
+    e.pos = dragEnt.p0 + (ev.clientX - dragEnt.sx) / k;
+    const r = stage.getBoundingClientRect();
+    e.side = (ev.clientY - r.top) < mid() ? "up" : "down";
+    apply();
+  });
+  card.addEventListener("pointerup", () => {
+    if (!dragEnt || dragEnt.e !== e) return;
+    card.classList.remove("moving");
+    if (dragEnt.moved) dirty();
+    dragEnt = null;
+  });
+  const stem = document.createElement("div"); stem.className = "estem";
+  const dot = document.createElement("div"); dot.className = "edot";
+  const labTick = document.createElement("div"); labTick.className = "elabel";
+  stage.append(stem, dot, labTick, card);
+  return { card, stem, dot, lab: labTick };
+}
+function rebuild() {
+  Object.values(dom).forEach(d => { d.card.remove(); d.stem.remove(); d.dot.remove(); d.lab.remove(); });
+  dom = {};
+  DATA.entries.forEach(e => { dom[e.id] = makeEntry(e); });
+  el("proj").textContent = PROJ;
+  el("tl-title").textContent = DATA.title;
+  document.title = DATA.title + " — ThoughtBoard";
+  apply();
+}
+
+/* ---------------- add ---------------- */
+function genId() {
+  let i = DATA.entries.length + 1;
+  while (DATA.entries.some(e => e.id === "e-" + i)) i++;
+  return "e-" + i;
+}
+function addEntry(pos, side) {
+  const e = { id: genId(), pos, side: side || "down", title: "", text: "" };
+  DATA.entries.push(e);
+  rebuild(); dirty();
+  const ti = dom[e.id].card.querySelector(".f-title");
+  if (ti) ti.focus();
+}
+stage.addEventListener("dblclick", e => {
+  if (e.target !== stage && e.target.id !== "axis") return;
+  const r = stage.getBoundingClientRect();
+  addEntry((e.clientX - r.left - tx) / k, (e.clientY - r.top) < mid() ? "up" : "down");
+});
+el("addbtn").addEventListener("click", () => {
+  const r = stage.getBoundingClientRect();
+  addEntry((r.width / 2 - tx) / k, "down");
+});
+
+/* ---------------- pan + zoom + pinch ---------------- */
+function zoomAt(f, cx) {
+  const ns = Math.min(4, Math.max(.2, k * f));
+  tx = cx - (cx - tx) * ns / k; k = ns; apply();
+}
+const touches = new Map();
+let pinch = null;
+stage.addEventListener("pointerdown", e => {
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size === 2) {
+    const [a, b] = [...touches.values()];
+    pinch = { d0: Math.abs(a.x - b.x) || 1, k0: k, tx0: tx };
+    panning = false; stage.classList.remove("dragging");
+    return;
+  }
+  panning = true; moved = false; sx = e.clientX - tx; stage.classList.add("dragging");
+  try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+});
+stage.addEventListener("pointermove", e => {
+  if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch && touches.size === 2) {
+    const [a, b] = [...touches.values()];
+    const r = stage.getBoundingClientRect();
+    const midX = (a.x + b.x) / 2 - r.left;
+    const ns = Math.min(4, Math.max(.2, pinch.k0 * (Math.abs(a.x - b.x) || 1) / pinch.d0));
+    const cx = (midX - pinch.tx0) / pinch.k0;
+    k = ns; tx = midX - cx * ns; apply();
+    moved = true;
+    return;
+  }
+  if (!panning) return;
+  moved = true; tx = e.clientX - sx; apply();
+});
+const dropTouch = e => { touches.delete(e.pointerId); if (touches.size < 2) pinch = null; };
+stage.addEventListener("pointerup", e => { dropTouch(e); panning = false; stage.classList.remove("dragging"); });
+stage.addEventListener("pointercancel", e => { dropTouch(e); panning = false; stage.classList.remove("dragging"); });
+stage.addEventListener("wheel", e => {
+  e.preventDefault();
+  const r = stage.getBoundingClientRect();
+  zoomAt(e.deltaY < 0 ? 1.12 : .89, e.clientX - r.left);
+}, { passive: false });
+el("zi").onclick = () => zoomAt(1.2, stage.getBoundingClientRect().width / 2);
+el("zo").onclick = () => zoomAt(.83, stage.getBoundingClientRect().width / 2);
+el("zl").onclick = () => fit();
+el("fit").onclick = () => fit();
+function fit() {
+  const w = stage.getBoundingClientRect().width;
+  if (!DATA.entries.length) { k = 1; tx = w / 2; apply(); return; }
+  const ps = DATA.entries.map(e => e.pos);
+  const lo = Math.min(...ps) - 180, hi = Math.max(...ps) + 180;
+  k = Math.min(1.2, Math.max(.2, w / Math.max(hi - lo, 1)));
+  tx = (w - (hi + lo) * k) / 2;
+  apply();
+}
+el("lightbox").addEventListener("click", () => el("lightbox").classList.remove("open"));
+window.addEventListener("resize", apply);
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    if (el("lightbox").classList.contains("open")) { el("lightbox").classList.remove("open"); return; }
+    if (inField()) document.activeElement.blur();
+  }
+});
+
+/* ---------------- export ---------------- */
+function flash(b, t) { const o = b.textContent; b.textContent = t; setTimeout(() => { b.textContent = o; }, 900); }
+el("copyj").addEventListener("click", async () => {
+  const s = JSON.stringify(serialize(), null, 2) + "\n";
+  try { await navigator.clipboard.writeText(s); }
+  catch (e) { const ta = document.createElement("textarea"); ta.value = s; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); }
+  flash(el("copyj"), "copied");
+});
+el("dlj").addEventListener("click", () => {
+  const b = new Blob([JSON.stringify(serialize(), null, 2) + "\n"], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = TLID + ".json"; a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+/* ---------------- boot ---------------- */
+(async () => {
+  try {
+    const r = await fetch(API);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    DATA = j;
+  } catch (e) {
+    setStat("load failed", "bad");
+    return;
+  }
+  rebuild(); fit();
+  setStat("saved " + (DATA.updated || ""));
+})();
+</script>
+</body>
+</html>
