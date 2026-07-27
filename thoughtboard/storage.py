@@ -622,6 +622,11 @@ def validate_codemap(m: dict) -> None:
                 and isinstance(pos.get("y"), (int, float))):
             raise StorageError(f"block {b['id']!r}: 'pos' {{x, y}} is required "
                                "(codemap blocks are freely placed)")
+        for f, lo, hi in (("w", 240, 1400), ("h", 80, 2400)):
+            v = b.get(f)
+            if v is not None and not (isinstance(v, (int, float)) and lo <= v <= hi):
+                raise StorageError(f"block {b['id']!r}: '{f}' must be a number "
+                                   f"between {lo} and {hi}")
         for l in b.get("links", []):
             if l.get("to") not in idset:
                 raise StorageError(f"block {b['id']!r}: link target {l.get('to')!r} "
@@ -697,6 +702,34 @@ def upsert_code_block(project: str, codemap_id: str, block_id: str, *, title=Non
     save_codemap(project, codemap_id, m)
     return {"block": {k: v for k, v in block.items() if k != "code"},
             "code_lines": len((block.get("code") or "").splitlines()), "created": creating}
+
+
+def update_codemap_layout(project: str, codemap_id: str, layout: dict) -> dict:
+    """Merge user layout (pos / w / h per block id) into a codemap — the ONLY
+    codemap mutation the portal may perform; code content stays agent-written."""
+    m = get_codemap(project, codemap_id)
+    if not isinstance(layout, dict):
+        raise StorageError("layout must be an object of {block_id: {pos, w, h}}")
+    known = {b["id"] for b in m["blocks"]}
+    unknown = set(layout) - known
+    if unknown:
+        raise StorageError(f"unknown block ids in layout: {sorted(unknown)}")
+    for b in m["blocks"]:
+        lay = layout.get(b["id"])
+        if not isinstance(lay, dict):
+            continue
+        pos = lay.get("pos")
+        if pos is not None:
+            if not (isinstance(pos, dict) and isinstance(pos.get("x"), (int, float))
+                    and isinstance(pos.get("y"), (int, float))):
+                raise StorageError(f"layout for {b['id']!r}: pos must be {{x, y}} numbers")
+            b["pos"] = {"x": round(pos["x"]), "y": round(pos["y"])}
+        for f in ("w", "h"):
+            if lay.get(f) is not None:
+                b[f] = int(lay[f])
+            elif f in lay:  # explicit null clears the override
+                b.pop(f, None)
+    return save_codemap(project, codemap_id, m)
 
 
 def delete_code_block(project: str, codemap_id: str, block_id: str) -> dict:

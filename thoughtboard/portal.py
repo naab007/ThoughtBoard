@@ -170,6 +170,11 @@ def build_app(port: int = PORT_DEFAULT) -> FastAPI:
     async def api_codemap_version(project: str, codemap_id: str):
         return {"version": storage.codemap_version(project, codemap_id)}
 
+    @app.post("/api/projects/{project}/codemaps/{codemap_id}/layout")
+    async def api_codemap_layout(project: str, codemap_id: str, payload: dict):
+        return storage.update_codemap_layout(project, codemap_id,
+                                             payload.get("blocks", {}))
+
     # ---------------------------------------------------------- timelines
     @app.post("/api/projects/{project}/timelines")
     async def api_create_timeline(project: str, payload: dict):

@@ -42,7 +42,10 @@ header{display:flex;align-items:center;gap:14px;padding:0 16px;height:52px;flex:
 #edges .hot{stroke:var(--accent)!important;opacity:1}
 #edges text.hot{fill:var(--accent)}
 #edges .fade{opacity:.18}
-.cblock{position:absolute;width:420px;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);border-radius:11px;box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 10px 24px -16px #000;transition:border-color .16s,opacity .18s;cursor:pointer}
+.cblock{position:absolute;width:420px;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);border-radius:11px;box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 10px 24px -16px #000;transition:border-color .16s,opacity .18s;cursor:pointer;touch-action:none}
+.cblock.moving{z-index:3;border-color:var(--line-2);cursor:grabbing}
+.rz{position:absolute;right:1px;bottom:1px;width:16px;height:16px;cursor:nwse-resize;border-radius:0 0 10px 0;background:linear-gradient(135deg,transparent 52%,var(--line-2) 54%,transparent 58%,transparent 66%,var(--line-2) 68%,transparent 72%)}
+.rz:hover{background:linear-gradient(135deg,transparent 52%,var(--accent) 54%,transparent 58%,transparent 66%,var(--accent) 68%,transparent 72%)}
 .cblock:hover{border-color:var(--line-2)}
 .cblock.sel{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim),0 18px 34px -20px #000}
 .cblock.fade{opacity:.22}
@@ -77,30 +80,60 @@ header{display:flex;align-items:center;gap:14px;padding:0 16px;height:52px;flex:
   <div class="brand"><span class="mark"></span><div class="hgroup"><span class="proj" id="proj"></span><h1 id="cm-title"></h1></div></div>
   <div class="spacer"></div>
   <label class="search"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6.8" cy="6.8" r="4.4"/><path d="M10.2 10.2 14 14"/></svg><input id="q" type="search" placeholder="Filter code" autocomplete="off"><kbd>/</kbd></label>
-  <div class="tools"><button id="zo" title="Zoom out">−</button><button class="zoom" id="zl" title="Zoom">100%</button><button id="zi" title="Zoom in">+</button><button id="fit" title="Fit to view (F)">⤢</button></div>
-  <span class="ro" title="This board is written by the agent through MCP — the page only displays it">agent-written</span>
+  <div class="tools"><button id="zo" title="Zoom out">−</button><button class="zoom" id="zl" title="Zoom">100%</button><button id="zi" title="Zoom in">+</button><button id="fit" title="Fit to view (F)">⤢</button><button id="auto" title="Auto-align: layer blocks by link depth, left to right">⇅</button></div>
+  <span class="ro" title="Code content is written by the agent through MCP; you arrange the layout">code: agent · layout: yours</span>
   <span id="stat">loading…</span>
 </header>
 <div id="stage">
   <div id="canvas"><svg id="edges"><defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.6 L7.4 4 L0 7.4 z" fill="rgba(255,255,255,.35)"/></marker><marker id="arrow-hot" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.6 L7.4 4 L0 7.4 z" fill="oklch(.78 .1 215)"/></marker></defs></svg></div>
   <div id="emptyhint">no code blocks yet<br>the agent fills this map via mcp</div>
-  <div id="tip">drag to pan · scroll to zoom · click a block to trace its links<br>code text is selectable · F fit · Esc clear</div>
+  <div id="tip">drag a block to move it · drag its corner to resize · ⇅ auto-align<br>click a block to trace its links · code text is selectable · F fit · Esc clear</div>
 </div>
 <script>
 const [, , PROJ, CMID] = location.pathname.split("/");
 const API = "/api/projects/" + PROJ + "/codemaps/" + CMID;
 const el = id => document.getElementById(id);
 const stage = el("stage"), canvas = el("canvas"), svg = el("edges");
-const BLOCK_W = 420;
 
 let DATA = null, byId = {}, dom = {}, H = {}, paths = [];
 let sel = null, q = "", ver = null;
 let W = 800, Hgt = 600;
 let tx = 0, ty = 0, k = 1, drag = false, sx = 0, sy = 0, moved = false;
+let nd = null, rz = null, squelch = false; // block drag / resize state
 const openState = {}; // per-block expand state, survives refreshes
+const bw = b => b.w || 420;
+const bh = b => b.h || 238;
 
 const inField = () => ["INPUT", "TEXTAREA", "SELECT"].includes((document.activeElement || {}).tagName);
 function setStat(t) { el("stat").textContent = t; }
+
+/* ---------------- layout persistence (the page's only write) ---------------- */
+let saveTimer = 0, saving = false, again = false, unsavedLayout = false;
+async function saveLayout() {
+  if (saving) { again = true; return; }
+  saving = true; setStat("saving layout…");
+  try {
+    const blocks = {};
+    DATA.blocks.forEach(b => {
+      blocks[b.id] = { pos: { x: Math.round(b.pos.x), y: Math.round(b.pos.y) } };
+      if (b.w) blocks[b.id].w = Math.round(b.w);
+      if (b.h) blocks[b.id].h = Math.round(b.h);
+    });
+    const r = await fetch(API + "/layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ blocks }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    if (j.version) ver = j.version;
+    unsavedLayout = false;
+    setStat("layout saved " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+  } catch (e) {
+    setStat("layout save failed — retrying");
+    clearTimeout(saveTimer); saveTimer = setTimeout(saveLayout, 3000);
+  } finally {
+    saving = false;
+    if (again) { again = false; saveLayout(); }
+  }
+}
+function dirtyLayout() { unsavedLayout = true; setStat("layout…"); clearTimeout(saveTimer); saveTimer = setTimeout(saveLayout, 800); }
 
 /* ---------------- syntax highlighting (regex, self-contained) ---------------- */
 const KW = {
@@ -138,7 +171,7 @@ function hl(code, lang) {
 /* ---------------- rendering ---------------- */
 function extents() {
   if (DATA.blocks.length) {
-    W = Math.max(...DATA.blocks.map(b => b.pos.x + BLOCK_W)) + 160;
+    W = Math.max(...DATA.blocks.map(b => b.pos.x + bw(b))) + 160;
     Hgt = Math.max(...DATA.blocks.map(b => b.pos.y + (H[b.id] || 200))) + 160;
   } else { W = 800; Hgt = 600; }
   canvas.style.width = W + "px"; canvas.style.height = Hgt + "px";
@@ -148,6 +181,7 @@ function makeBlock(b) {
   const d = document.createElement("div");
   d.className = "cblock";
   d.style.left = b.pos.x + "px"; d.style.top = b.pos.y + "px";
+  d.style.width = bw(b) + "px";
   const head = document.createElement("div"); head.className = "chead";
   const t = document.createElement("div"); t.className = "t"; t.textContent = b.title; t.title = b.title;
   head.appendChild(t);
@@ -159,6 +193,7 @@ function makeBlock(b) {
   if (b.code) {
     const wrap = document.createElement("div"); wrap.className = "ccode" + (openState[b.id] ? " open" : "");
     const pre = document.createElement("pre");
+    if (b.h && !openState[b.id]) pre.style.maxHeight = b.h + "px";
     const codeEl = document.createElement("code"); codeEl.innerHTML = hl(b.code, b.lang);
     pre.appendChild(codeEl); wrap.appendChild(pre); d.appendChild(wrap);
     pre.addEventListener("pointerdown", e => e.stopPropagation()); // selectable, never a pan
@@ -173,6 +208,7 @@ function makeBlock(b) {
       e.stopPropagation();
       openState[b.id] = !openState[b.id];
       wrap.classList.toggle("open", openState[b.id]);
+      pre.style.maxHeight = openState[b.id] ? "" : (b.h ? b.h + "px" : "");
       exp.textContent = openState[b.id] ? "collapse" : "expand";
       requestAnimationFrame(() => { measure(); extents(); buildEdges(); });
     });
@@ -188,14 +224,60 @@ function makeBlock(b) {
     foot.appendChild(cp);
     d.appendChild(foot);
   }
-  d.addEventListener("pointerdown", e => e.stopPropagation());
+  /* move: drag anywhere on the card except code text, buttons and the handle */
+  d.addEventListener("pointerdown", e => {
+    e.stopPropagation();
+    if (e.target.closest("pre") || e.target.closest("button") || e.target.closest(".rz")) return;
+    nd = { id: b.id, sx: e.clientX, sy: e.clientY, ox: b.pos.x, oy: b.pos.y, moved: false };
+    try { d.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  d.addEventListener("pointermove", e => {
+    if (nd && nd.id === b.id) {
+      if (!nd.moved && Math.hypot(e.clientX - nd.sx, e.clientY - nd.sy) < 4) return;
+      nd.moved = true; d.classList.add("moving");
+      b.pos.x = nd.ox + (e.clientX - nd.sx) / k;
+      b.pos.y = nd.oy + (e.clientY - nd.sy) / k;
+      d.style.left = b.pos.x + "px"; d.style.top = b.pos.y + "px";
+      scheduleEdges();
+      return;
+    }
+    if (rz && rz.id === b.id) {
+      const w = Math.min(1400, Math.max(280, rz.w0 + (e.clientX - rz.sx) / k));
+      const h = Math.min(2400, Math.max(100, rz.h0 + (e.clientY - rz.sy) / k));
+      b.w = Math.round(w); b.h = Math.round(h);
+      d.style.width = b.w + "px";
+      const pre = d.querySelector("pre");
+      if (pre && !openState[b.id]) pre.style.maxHeight = b.h + "px";
+      scheduleEdges();
+    }
+  });
+  d.addEventListener("pointerup", () => {
+    if (nd && nd.id === b.id) {
+      if (nd.moved) { d.classList.remove("moving"); measure(); extents(); buildEdges(); dirtyLayout(); squelch = true; }
+      nd = null;
+    }
+    if (rz && rz.id === b.id) {
+      rz = null; measure(); extents(); buildEdges(); dirtyLayout(); squelch = true;
+    }
+  });
   d.addEventListener("click", e => {
     e.stopPropagation();
+    if (squelch) { squelch = false; return; }
     sel = sel === b.id ? null : b.id;
     paint();
   });
+  /* resize handle */
+  const rzh = document.createElement("div"); rzh.className = "rz"; rzh.title = "Drag to resize";
+  rzh.addEventListener("pointerdown", e => {
+    e.stopPropagation();
+    rz = { id: b.id, sx: e.clientX, sy: e.clientY, w0: bw(b), h0: bh(b) };
+    try { d.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  d.appendChild(rzh);
   return d;
 }
+let raf = 0;
+function scheduleEdges() { if (!raf) raf = requestAnimationFrame(() => { raf = 0; buildEdges(); }); }
 function measure() { DATA.blocks.forEach(b => { if (dom[b.id]) H[b.id] = dom[b.id].offsetHeight; }); }
 function addPath(a, bb, label) {
   const A = byId[a].pos, B = byId[bb].pos;
@@ -204,12 +286,12 @@ function addPath(a, bb, label) {
   p.setAttribute("stroke", "rgba(255,255,255,.28)");
   p.setAttribute("marker-end", "url(#arrow)");
   let x1, y1, x2, y2;
-  if (B.x >= A.x + BLOCK_W + 20 || B.x >= A.x) { // target to the right (or same col): right → left
-    x1 = A.x + BLOCK_W; y1 = A.y + Math.min((H[a] || 100) / 2, 60);
+  if (B.x >= A.x) { // target to the right (or same col): right → left
+    x1 = A.x + bw(byId[a]); y1 = A.y + Math.min((H[a] || 100) / 2, 60);
     x2 = B.x - 6; y2 = B.y + Math.min((H[bb] || 100) / 2, 60);
   } else { // target to the left
     x1 = A.x; y1 = A.y + Math.min((H[a] || 100) / 2, 60);
-    x2 = B.x + BLOCK_W + 6; y2 = B.y + Math.min((H[bb] || 100) / 2, 60);
+    x2 = B.x + bw(byId[bb]) + 6; y2 = B.y + Math.min((H[bb] || 100) / 2, 60);
   }
   const mx = (x1 + x2) / 2;
   p.setAttribute("d", `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`);
@@ -276,9 +358,10 @@ async function pollVersion() {
     j = await r.json();
   } catch (e) { return; }
   if (ver === null || j.version === ver) { if (ver === null) ver = j.version; return; }
+  if (saving || unsavedLayout) { ver = j.version; return; } // our layout write lands on the newest doc anyway
   const s = getSelection();
   if (s && !s.isCollapsed && s.anchorNode && stage.contains(s.anchorNode)) return; // don't yank a text selection
-  if (inField()) return;
+  if (nd || rz || inField()) return;
   ver = j.version;
   try {
     const r2 = await fetch(API);
@@ -350,6 +433,34 @@ stage.addEventListener("wheel", e => { e.preventDefault(); const r = stage.getBo
 el("zi").onclick = () => zoom(1.18); el("zo").onclick = () => zoom(.85);
 el("zl").onclick = () => fit(true);
 el("fit").onclick = () => fit(true);
+el("auto").onclick = () => {
+  if (!DATA.blocks.length) return;
+  // layer by longest path from roots (link direction = left → right)
+  const ids = DATA.blocks.map(b => b.id);
+  const layer = {}; ids.forEach(i => layer[i] = 0);
+  for (let it = 0; it < ids.length; it++) {
+    let changed = false;
+    DATA.blocks.forEach(b => (b.links || []).forEach(l => {
+      if (layer[l.to] !== undefined && layer[l.to] < layer[b.id] + 1 && layer[b.id] + 1 < ids.length) {
+        layer[l.to] = layer[b.id] + 1; changed = true;
+      }
+    }));
+    if (!changed) break;
+  }
+  const groups = {};
+  DATA.blocks.forEach(b => { (groups[layer[b.id]] = groups[layer[b.id]] || []).push(b); });
+  let x = 60;
+  Object.keys(groups).map(Number).sort((a, b) => a - b).forEach(L => {
+    let y = 60, colW = 0;
+    groups[L].forEach(b => {
+      b.pos = { x, y };
+      y += (H[b.id] || 200) + 44;
+      colW = Math.max(colW, bw(b));
+    });
+    x += colW + 90;
+  });
+  rebuild(); fit(true); dirtyLayout();
+};
 el("q").addEventListener("input", e => { q = e.target.value.trim().toLowerCase(); paint(); });
 document.addEventListener("keydown", e => {
   if (e.key === "/" && !inField()) { e.preventDefault(); el("q").focus(); }
