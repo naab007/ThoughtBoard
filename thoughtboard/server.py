@@ -248,6 +248,22 @@ def create_codemap(project: str, codemap_id: str, title: str, description: str =
 
 
 @mcp.tool()
+def ingest_code(project: str, codemap_id: str, path: str, include: str | None = None,
+                max_blocks: int = 50, replace: bool = False, title: str | None = None,
+                description: str = "") -> dict:
+    """Auto-build a codemap from source code: point at a file or directory and it
+    extracts functions/methods (Python via AST with docstring notes; js/ts and
+    c/cpp/cs/java best-effort), resolves 'calls' edges between them, keeps the
+    most-connected max_blocks, and auto-layouts by call depth. include = glob to
+    narrow a directory (e.g. 'core/**/*.py'). replace=True overwrites an existing
+    codemap. After ingesting, refine with upsert_code_block / link_code_blocks."""
+    from . import ingest as ingest_mod
+    return ingest_mod.ingest_code(project, codemap_id, path, include=include,
+                                  max_blocks=max_blocks, replace=replace,
+                                  title=title, description=description)
+
+
+@mcp.tool()
 def get_codemap(project: str, codemap_id: str) -> dict:
     """Read a full code map including code bodies (dump_board shows structure only)."""
     return storage.get_codemap(project, codemap_id)
