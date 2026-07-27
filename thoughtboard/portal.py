@@ -119,20 +119,16 @@ def build_app(port: int = PORT_DEFAULT) -> FastAPI:
         storage.check_slug("codemap id", codemap_id)
         return page("code.html")
 
+    @app.get("/research/{project}", response_class=HTMLResponse)
+    async def research_board(project: str):
+        storage.check_slug("project", project)
+        return page("research.html")
+
     @app.get("/research/{project}/{doc}", response_class=HTMLResponse)
-    async def research_page(project: str, doc: str):
-        text = storage.get_research(project, doc)
-        try:
-            import markdown
-            body = markdown.markdown(text, extensions=["fenced_code", "tables"])
-        except ImportError:
-            body = f"<pre>{html_mod.escape(text)}</pre>"
-        meta = storage._research_summary(storage._research_path(project, doc))
-        tpl = (STATIC / "research.html").read_text(encoding="utf-8")
-        return HTMLResponse(tpl
-                            .replace("__TITLE__", html_mod.escape(meta["title"]))
-                            .replace("__PROJECT__", html_mod.escape(project))
-                            .replace("__BODY__", body))
+    async def research_board_doc(project: str, doc: str):
+        storage.check_slug("project", project)
+        storage.check_slug("research doc name", doc)
+        return page("research.html")
 
     # --------------------------------------------------------------- api
     @app.get("/api/projects")
@@ -159,6 +155,36 @@ def build_app(port: int = PORT_DEFAULT) -> FastAPI:
     @app.put("/api/projects/{project}/maps/{map_id}")
     async def api_save_map(project: str, map_id: str, payload: dict):
         return storage.save_map(project, map_id, payload)
+
+    # ----------------------------------------------------------- research
+    @app.get("/api/projects/{project}/research")
+    async def api_research_cards(project: str):
+        return {"cards": storage.research_cards(project),
+                "layout": storage.research_layout(project)}
+
+    @app.get("/api/projects/{project}/research/version")
+    async def api_research_version(project: str):
+        return {"version": storage.research_version(project)}
+
+    @app.get("/api/projects/{project}/research/{doc}/html")
+    async def api_research_html(project: str, doc: str):
+        text = storage.get_research(project, doc)
+        fm, body = storage._parse_frontmatter(text)
+        try:
+            import markdown
+            html_body = markdown.markdown(body, extensions=["fenced_code", "tables"])
+        except ImportError:
+            html_body = f"<pre>{html_mod.escape(body)}</pre>"
+        title = fm.get("title")
+        if not title:
+            import re as _re
+            h = _re.search(r"^#\s+(.+)$", body, _re.M)
+            title = h.group(1).strip() if h else doc
+        return {"doc": doc, "title": title, "meta": fm, "html": html_body}
+
+    @app.post("/api/projects/{project}/research/layout")
+    async def api_research_layout(project: str, payload: dict):
+        return storage.save_research_layout(project, payload)
 
     # ------------------------------------------- codemaps (viewer is read-only:
     # only the agent writes these, via the MCP tools — hence no POST/PUT here)

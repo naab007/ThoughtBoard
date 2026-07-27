@@ -323,8 +323,21 @@ def get_research(project: str, doc: str) -> str:
 @mcp.tool()
 def write_research(project: str, doc: str, content: str) -> dict:
     """Create or overwrite a research doc. Use frontmatter: title, date, tags,
-    nodes (related map node ids)."""
+    nodes (related map node ids). Docs appear as cards on the research board
+    at /research/<project> (click to read)."""
     return storage.write_research(project, doc, content)
+
+
+@mcp.tool()
+def ingest_research(project: str, path: str, include: str | None = None,
+                    replace: bool = False, max_docs: int = 300) -> dict:
+    """Bulk-import research docs (.md/.markdown/.txt) from a file or directory
+    into a project's research board — verbatim copies, sources untouched.
+    Doc slugs come from filenames; existing slugs are skipped unless
+    replace=True. include = glob to narrow (e.g. '**/*.md'). Imported docs
+    flow onto the board at /research/<project> automatically."""
+    return storage.ingest_research(project, path, include=include,
+                                   replace=replace, max_docs=max_docs)
 
 
 def main() -> None:

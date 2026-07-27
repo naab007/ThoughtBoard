@@ -902,3 +902,149 @@ def write_research(project: str, doc: str, content: str) -> dict:
     p = _research_path(project, doc, must_exist=False)
     _atomic_write(p, content if content.endswith("\n") else content + "\n")
     return {"project": project, "doc": doc, "bytes": len(content.encode("utf-8"))}
+
+
+RESEARCH_EXTS = {".md", ".markdown", ".txt"}
+RESEARCH_MAX_BYTES = 2_000_000
+
+
+def ingest_research(project: str, path: str, include: str | None = None,
+                    replace: bool = False, max_docs: int = 300) -> dict:
+    """Bulk-import research docs from a file or directory (verbatim copies —
+    the source files are never modified)."""
+    _project_dir(project)
+    root = Path(path)
+    if not root.exists():
+        raise StorageError(f"path {path!r} does not exist")
+    max_docs = max(1, min(int(max_docs), 1000))
+    if root.is_file():
+        files = [root]
+    else:
+        files = [p for p in root.glob(include or "**/*") if p.is_file()
+                 and not any(part in SLUG_JUNK_DIRS for part in p.parts)]
+    files = [f for f in files if f.suffix.lower() in RESEARCH_EXTS
+             and f.stat().st_size <= RESEARCH_MAX_BYTES]
+    files = sorted(set(files))
+    if not files:
+        raise StorageError(
+            "no research docs found — supported extensions: "
+            f"{sorted(RESEARCH_EXTS)}; use include='**/*.md'-style globs to narrow")
+    truncated = len(files) > max_docs
+    files = files[:max_docs]
+    existing = {r["doc"] for r in list_research(project)}
+    seen_this_run: set = set()
+    imported, skipped = [], []
+    for f in files:
+        slug = re.sub(r"[^a-z0-9_-]+", "-", f.stem.lower()).strip("-")[:60] or "doc"
+        base, i = slug, 2
+        while slug in seen_this_run:  # two source files sharing a stem
+            slug = f"{base}-{i}"[:64]
+            i += 1
+        if slug in existing and not replace:
+            skipped.append(slug)
+            seen_this_run.add(slug)
+            continue
+        content = f.read_text(encoding="utf-8-sig", errors="replace")
+        write_research(project, slug, content)
+        imported.append(slug)
+        seen_this_run.add(slug)
+        existing.add(slug)
+    return {"project": project, "imported": len(imported), "skipped_existing": len(skipped),
+            "docs": imported[:60], "doc_list_truncated": len(imported) > 60,
+            "source_files_truncated": truncated,
+            "browse_at": f"/research/{project}"}
+
+
+SLUG_JUNK_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".obsidian"}
+
+_FM_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.S)
+
+
+def _parse_frontmatter(text: str) -> tuple[dict, str]:
+    m = _FM_RE.match(text)
+    if not m:
+        return {}, text
+    fm = {}
+    for line in m.group(1).splitlines():
+        k, sep, v = line.partition(":")
+        if sep:
+            fm[k.strip().lower()] = v.strip().strip("'\"")
+    return fm, text[m.end():]
+
+
+def _excerpt(body: str, limit: int = 260) -> str:
+    body = re.sub(r"```[\s\S]*?```", " ", body)
+    body = re.sub(r"^#+\s*", "", body, flags=re.M)
+    body = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", body)
+    body = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", body)
+    body = re.sub(r"[*_`>|]", "", body)
+    text = " ".join(body.split())
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
+def research_cards(project: str) -> list[dict]:
+    """Rich per-doc metadata for the research board."""
+    d = _project_dir(project)
+    out = []
+    for p in sorted((d / "research").glob("*.md")):
+        try:
+            text = p.read_text(encoding="utf-8-sig", errors="replace")
+        except OSError:
+            continue
+        fm, body = _parse_frontmatter(text)
+        title = fm.get("title")
+        if not title:
+            h = re.search(r"^#\s+(.+)$", body, re.M)
+            title = h.group(1).strip() if h else p.stem
+        tags = [t.strip() for t in fm.get("tags", "").strip("[]").split(",") if t.strip()]
+        out.append({"doc": p.stem, "title": title, "date": fm.get("date", ""),
+                    "tags": tags[:6], "excerpt": _excerpt(body),
+                    "words": len(body.split())})
+    return out
+
+
+def _research_layout_path(project: str) -> Path:
+    return _project_dir(project) / "research" / "_layout.json"
+
+
+def research_layout(project: str) -> dict:
+    try:
+        return json.loads(_research_layout_path(project).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"docs": {}}
+
+
+def save_research_layout(project: str, layout: dict) -> dict:
+    if not isinstance(layout, dict) or not isinstance(layout.get("docs"), dict):
+        raise StorageError("layout must be {docs: {doc_slug: {pos:{x,y}, w?, h?}}}")
+    known = {p.stem for p in (_project_dir(project) / "research").glob("*.md")}
+    clean = {}
+    for slug, lay in layout["docs"].items():
+        if slug not in known or not isinstance(lay, dict):
+            continue
+        pos = lay.get("pos")
+        if not (isinstance(pos, dict) and isinstance(pos.get("x"), (int, float))
+                and isinstance(pos.get("y"), (int, float))):
+            raise StorageError(f"layout for {slug!r}: pos must be {{x, y}} numbers")
+        entry = {"pos": {"x": round(pos["x"]), "y": round(pos["y"])}}
+        for f, lo, hi in (("w", 240, 900), ("h", 120, 1200)):
+            v = lay.get(f)
+            if v is not None:
+                if not (isinstance(v, (int, float)) and lo <= v <= hi):
+                    raise StorageError(f"layout for {slug!r}: {f} must be {lo}..{hi}")
+                entry[f] = int(v)
+        clean[slug] = entry
+    _atomic_write(_research_layout_path(project),
+                  json.dumps({"docs": clean}, indent=2) + "\n")
+    return {"project": project, "docs": len(clean), "version": research_version(project)}
+
+
+def research_version(project: str) -> int:
+    d = _project_dir(project) / "research"
+    best = 0
+    for p in list(d.glob("*.md")) + [_research_layout_path(project)]:
+        try:
+            best = max(best, p.stat().st_mtime_ns)
+        except OSError:
+            pass
+    return best

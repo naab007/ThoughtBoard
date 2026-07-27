@@ -123,13 +123,21 @@ async function load() {
     if (p.research.length) {
       card.appendChild(el('div', 'sec', 'Research'));
       const rl = el('ul');
-      p.research.forEach(r => {
+      const boardLi = el('li'), boardA = el('a');
+      boardA.href = '/research/' + p.slug;
+      const bi = el('i'); bi.className = 'r';
+      boardA.appendChild(bi);
+      boardA.appendChild(el('span', 'nm', 'Research board'));
+      boardA.appendChild(el('span', 'meta', p.research.length + ' docs'));
+      boardLi.appendChild(boardA); rl.appendChild(boardLi);
+      p.research.slice(0, 4).forEach(r => {
         const li = el('li'), a = el('a');
         a.href = '/research/' + p.slug + '/' + r.doc;
-        const i = el('i'); i.className = 'r';
+        const i = el('i'); i.className = 'r'; i.style.opacity = '.35';
         a.appendChild(i); a.appendChild(el('span', 'nm', r.title));
         li.appendChild(a); rl.appendChild(li);
       });
+      if (p.research.length > 4) rl.appendChild(el('div', 'empty', '+ ' + (p.research.length - 4) + ' more on the board'));
       card.appendChild(rl);
     }
     const row = el('div', 'newrow');
