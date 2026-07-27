@@ -105,6 +105,21 @@ async function load() {
       });
       card.appendChild(tl);
     }
+    const cms = p.codemaps || [];
+    if (cms.length) {
+      card.appendChild(el('div', 'sec', 'Code maps'));
+      const cl = el('ul');
+      cms.forEach(c => {
+        const li = el('li'), a = el('a');
+        a.href = '/code/' + p.slug + '/' + c.id;
+        a.appendChild(el('i'));
+        a.querySelector('i').style.background = 'oklch(.78 .11 155)';
+        a.appendChild(el('span', 'nm', c.title));
+        a.appendChild(el('span', 'meta', c.blocks + ' blocks · ' + (c.updated || '')));
+        li.appendChild(a); cl.appendChild(li);
+      });
+      card.appendChild(cl);
+    }
     if (p.research.length) {
       card.appendChild(el('div', 'sec', 'Research'));
       const rl = el('ul');

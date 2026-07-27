@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code Map — ThoughtBoard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#08090b;--bg-2:#0c0e12;--panel:#10131a;--panel-2:#151922;--line:rgba(255,255,255,.075);--line-2:rgba(255,255,255,.14);--text:#e8ebf1;--text-2:#98a1b2;--text-3:#606a7b;--accent:oklch(.78 .1 215);--accent-dim:oklch(.78 .1 215/.16);--link:oklch(.75 .11 300);--mono:"IBM Plex Mono",ui-monospace,monospace;--tok-k:oklch(.76 .11 235);--tok-s:oklch(.78 .11 155);--tok-c:#5b6474;--tok-n:oklch(.79 .11 75)}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.5 "IBM Plex Sans",system-ui,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+header{display:flex;align-items:center;gap:14px;padding:0 16px;height:52px;flex:0 0 auto;background:linear-gradient(180deg,var(--panel-2),var(--panel));border-bottom:1px solid var(--line);position:relative;z-index:3}
+.home{font:500 10.5px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);text-decoration:none}
+.home:hover{color:var(--text)}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand .mark{width:9px;height:9px;border-radius:2px;background:var(--tok-s);box-shadow:0 0 12px var(--tok-s);flex:0 0 auto}
+.brand .proj{font:500 11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--text-3)}
+.brand h1{font-size:14.5px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hgroup{display:flex;flex-direction:column;gap:3px;min-width:0}
+.spacer{flex:1}
+.search{display:flex;align-items:center;gap:8px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:0 10px;height:32px;width:220px;transition:border-color .15s,box-shadow .15s}
+.search:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
+.search svg{flex:0 0 auto;opacity:.5}
+.search input{flex:1;min-width:0;background:none;border:0;outline:0;color:var(--text);font:13px/1 "IBM Plex Sans",sans-serif}
+.search input::placeholder{color:var(--text-3)}
+.search kbd{font:400 10px/1 var(--mono);color:var(--text-3);border:1px solid var(--line);border-radius:4px;padding:3px 4px}
+.tools{display:flex;align-items:center;gap:2px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:2px}
+.tools button{display:grid;place-items:center;min-width:28px;height:26px;padding:0 6px;border-radius:6px;color:var(--text-2);font:500 12px/1 var(--mono)}
+.tools button:hover{background:var(--panel-2);color:var(--text)}
+.tools .zoom{width:46px;font-size:11px;color:var(--text-3)}
+#stat{padding:0 10px;font:500 10px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);white-space:nowrap}
+.ro{padding:4px 9px;border:1px solid var(--line);border-radius:7px;font:500 9.5px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);white-space:nowrap}
+#stage{flex:1;position:relative;overflow:hidden;cursor:grab;touch-action:none;background:radial-gradient(circle at 1px 1px,rgba(255,255,255,.055) 1px,transparent 0) 0 0/26px 26px,radial-gradient(120% 90% at 30% 0,#0d1016 0,var(--bg) 70%)}
+#stage.dragging{cursor:grabbing}
+#stage::after{content:"";position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 140px 30px rgba(0,0,0,.55)}
+#canvas{position:absolute;transform-origin:0 0}
+#edges{position:absolute;top:0;left:0;overflow:visible;pointer-events:none}
+#edges path{transition:stroke .18s,opacity .18s}
+#edges .lbl{font:500 9.5px/1 var(--mono);fill:var(--text-3);letter-spacing:.06em;transition:fill .18s,opacity .18s}
+#edges .hot{stroke:var(--accent)!important;opacity:1}
+#edges text.hot{fill:var(--accent)}
+#edges .fade{opacity:.18}
+.cblock{position:absolute;width:420px;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);border-radius:11px;box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 10px 24px -16px #000;transition:border-color .16s,opacity .18s;cursor:pointer}
+.cblock:hover{border-color:var(--line-2)}
+.cblock.sel{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim),0 18px 34px -20px #000}
+.cblock.fade{opacity:.22}
+.cblock.hit{border-color:var(--link)}
+.chead{display:flex;align-items:center;gap:8px;padding:10px 13px 0}
+.chead .t{font-size:13.5px;font-weight:600;letter-spacing:-.005em;font-family:var(--mono);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chead .lang{margin-left:auto;flex:0 0 auto;padding:2px 7px;border:1px solid var(--line);border-radius:5px;font:500 9px/1.4 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)}
+.cfile{padding:3px 13px 0;font:400 10px/1.5 var(--mono);color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cnote{padding:6px 13px 0;font-size:11.5px;line-height:1.5;color:var(--text-2)}
+.ccode{position:relative;margin:9px 9px 0;border:1px solid var(--line);border-radius:8px;background:var(--bg-2);overflow:hidden}
+.ccode pre{max-height:238px;overflow:auto;padding:9px 11px;font:11px/1.55 var(--mono);color:#ccd3e0;user-select:text;cursor:text;scrollbar-width:thin;tab-size:4}
+.ccode.open pre{max-height:100vh}
+.ccode:not(.open).of::after{content:"";position:absolute;left:0;right:0;bottom:0;height:34px;background:linear-gradient(transparent,var(--bg-2));pointer-events:none}
+.tok-k{color:var(--tok-k)}
+.tok-s{color:var(--tok-s)}
+.tok-c{color:var(--tok-c);font-style:italic}
+.tok-n{color:var(--tok-n)}
+.cfoot{display:flex;align-items:center;gap:6px;padding:6px 13px 9px}
+.cfoot .meta{font:400 9.5px/1 var(--mono);color:var(--text-3)}
+.cfoot button{margin-left:auto;padding:3px 8px;border:1px solid var(--line);border-radius:5px;font:500 9px/1.4 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--text-2)}
+.cfoot button:hover{border-color:var(--accent);color:var(--text)}
+.cfoot button.exp{margin-left:0}
+#tip{position:absolute;right:14px;bottom:14px;font:400 10.5px/1.6 var(--mono);color:var(--text-3);text-align:right;pointer-events:none}
+#emptyhint{position:absolute;inset:0;display:none;place-items:center;font:500 11px/1.9 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-3);pointer-events:none;text-align:center}
+@media (pointer:coarse){.tools button{min-width:36px;height:34px}.cfoot button{padding:7px 10px}}
+@media (max-width:700px){#tip{display:none}.brand .proj{display:none}.search{width:140px}header{gap:8px;padding:0 10px}}
+</style>
+</head>
+<body>
+<header>
+  <a class="home" href="/">⌂ boards</a>
+  <div class="brand"><span class="mark"></span><div class="hgroup"><span class="proj" id="proj"></span><h1 id="cm-title"></h1></div></div>
+  <div class="spacer"></div>
+  <label class="search"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6.8" cy="6.8" r="4.4"/><path d="M10.2 10.2 14 14"/></svg><input id="q" type="search" placeholder="Filter code" autocomplete="off"><kbd>/</kbd></label>
+  <div class="tools"><button id="zo" title="Zoom out">−</button><button class="zoom" id="zl" title="Zoom">100%</button><button id="zi" title="Zoom in">+</button><button id="fit" title="Fit to view (F)">⤢</button></div>
+  <span class="ro" title="This board is written by the agent through MCP — the page only displays it">agent-written</span>
+  <span id="stat">loading…</span>
+</header>
+<div id="stage">
+  <div id="canvas"><svg id="edges"><defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.6 L7.4 4 L0 7.4 z" fill="rgba(255,255,255,.35)"/></marker><marker id="arrow-hot" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0.6 L7.4 4 L0 7.4 z" fill="oklch(.78 .1 215)"/></marker></defs></svg></div>
+  <div id="emptyhint">no code blocks yet<br>the agent fills this map via mcp</div>
+  <div id="tip">drag to pan · scroll to zoom · click a block to trace its links<br>code text is selectable · F fit · Esc clear</div>
+</div>
+<script>
+const [, , PROJ, CMID] = location.pathname.split("/");
+const API = "/api/projects/" + PROJ + "/codemaps/" + CMID;
+const el = id => document.getElementById(id);
+const stage = el("stage"), canvas = el("canvas"), svg = el("edges");
+const BLOCK_W = 420;
+
+let DATA = null, byId = {}, dom = {}, H = {}, paths = [];
+let sel = null, q = "", ver = null;
+let W = 800, Hgt = 600;
+let tx = 0, ty = 0, k = 1, drag = false, sx = 0, sy = 0, moved = false;
+const openState = {}; // per-block expand state, survives refreshes
+
+const inField = () => ["INPUT", "TEXTAREA", "SELECT"].includes((document.activeElement || {}).tagName);
+function setStat(t) { el("stat").textContent = t; }
+
+/* ---------------- syntax highlighting (regex, self-contained) ---------------- */
+const KW = {
+  py: "def class return if elif else for while import from as with try except finally raise yield lambda None True False not and or in is pass break continue global nonlocal async await assert del self",
+  js: "function const let var return if else for while import from export default class new try catch finally throw yield async await this typeof instanceof null undefined true false break continue switch case do delete void in of extends super static get set =>",
+  c: "int float double char void bool return if else for while switch case break continue struct class public private protected static const auto new delete template typename namespace using true false nullptr virtual override sizeof enum union unsigned long short signed include define ifdef ifndef endif pragma"
+};
+const LANG_FAMILY = { python: "py", py: "py", js: "js", javascript: "js", ts: "js", typescript: "js",
+  c: "c", cpp: "c", "c++": "c", h: "c", hpp: "c", cs: "c", csharp: "c", java: "c", rust: "c", go: "c" };
+function hl(code, lang) {
+  const fam = LANG_FAMILY[(lang || "").toLowerCase()] || null;
+  let out = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const parts = [];
+  if (fam === "py") parts.push(String.raw`(?:#[^\n]*|"""[\s\S]*?"""|'''[\s\S]*?''')`);
+  if (fam === "js" || fam === "c") parts.push(String.raw`(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)`);
+  parts.push(String.raw`(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'` + (fam === "js" ? String.raw`|\x60(?:\\.|[^\x60\\])*\x60` : "") + `)`);
+  const rx = new RegExp(parts.join("|"), "g");
+  out = out.replace(rx, m => {
+    const cls = (m[0] === "#" || m.startsWith("//") || m.startsWith("/*") || m.startsWith('"""') || m.startsWith("'''")) ? "tok-c" : "tok-s";
+    return `\x01${cls}\x02${m}\x01/\x02`;
+  });
+  out = out.replace(/\b(\d+(?:\.\d+)?)\b/g, "\x01tok-n\x02$1\x01/\x02");
+  if (fam) {
+    const kws = KW[fam].split(" ").filter(w => /^\w+$/.test(w)).join("|");
+    out = out.replace(new RegExp(`\\b(${kws})\\b`, "g"), "\x01tok-k\x02$1\x01/\x02");
+  }
+  // drop nested markers introduced inside earlier spans (comments/strings win)
+  out = out.replace(/\x01(tok-[a-z]+)\x02((?:[^\x01]|\x01(?:tok-[a-z]+|\/)\x02)*?)\x01\/\x02/g, (m0, cls, body) => {
+    const clean = body.replace(/\x01(?:tok-[a-z]+|\/)\x02/g, "");
+    return `<span class="${cls}">${clean}</span>`;
+  });
+  return out.replace(/\x01(?:tok-[a-z]+|\/)\x02/g, "");
+}
+
+/* ---------------- rendering ---------------- */
+function extents() {
+  if (DATA.blocks.length) {
+    W = Math.max(...DATA.blocks.map(b => b.pos.x + BLOCK_W)) + 160;
+    Hgt = Math.max(...DATA.blocks.map(b => b.pos.y + (H[b.id] || 200))) + 160;
+  } else { W = 800; Hgt = 600; }
+  canvas.style.width = W + "px"; canvas.style.height = Hgt + "px";
+  svg.setAttribute("width", W); svg.setAttribute("height", Hgt);
+}
+function makeBlock(b) {
+  const d = document.createElement("div");
+  d.className = "cblock";
+  d.style.left = b.pos.x + "px"; d.style.top = b.pos.y + "px";
+  const head = document.createElement("div"); head.className = "chead";
+  const t = document.createElement("div"); t.className = "t"; t.textContent = b.title; t.title = b.title;
+  head.appendChild(t);
+  if (b.lang) { const lg = document.createElement("span"); lg.className = "lang"; lg.textContent = b.lang; head.appendChild(lg); }
+  d.appendChild(head);
+  if (b.file) { const f = document.createElement("div"); f.className = "cfile"; f.textContent = b.file; f.title = b.file; d.appendChild(f); }
+  if (b.note) { const n = document.createElement("div"); n.className = "cnote"; n.textContent = b.note; d.appendChild(n); }
+  const lines = (b.code || "").split("\n").length;
+  if (b.code) {
+    const wrap = document.createElement("div"); wrap.className = "ccode" + (openState[b.id] ? " open" : "");
+    const pre = document.createElement("pre");
+    const codeEl = document.createElement("code"); codeEl.innerHTML = hl(b.code, b.lang);
+    pre.appendChild(codeEl); wrap.appendChild(pre); d.appendChild(wrap);
+    pre.addEventListener("pointerdown", e => e.stopPropagation()); // selectable, never a pan
+    pre.addEventListener("click", e => e.stopPropagation());
+    requestAnimationFrame(() => { if (pre.scrollHeight > pre.clientHeight + 4) wrap.classList.add("of"); });
+    const foot = document.createElement("div"); foot.className = "cfoot";
+    const meta = document.createElement("span"); meta.className = "meta"; meta.textContent = lines + " lines";
+    foot.appendChild(meta);
+    const exp = document.createElement("button"); exp.className = "exp";
+    exp.textContent = openState[b.id] ? "collapse" : "expand";
+    exp.addEventListener("click", e => {
+      e.stopPropagation();
+      openState[b.id] = !openState[b.id];
+      wrap.classList.toggle("open", openState[b.id]);
+      exp.textContent = openState[b.id] ? "collapse" : "expand";
+      requestAnimationFrame(() => { measure(); extents(); buildEdges(); });
+    });
+    foot.appendChild(exp);
+    const cp = document.createElement("button"); cp.textContent = "copy";
+    cp.addEventListener("click", async e => {
+      e.stopPropagation();
+      try { await navigator.clipboard.writeText(b.code); } catch (err) {
+        const ta = document.createElement("textarea"); ta.value = b.code; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
+      }
+      const o = cp.textContent; cp.textContent = "copied"; setTimeout(() => cp.textContent = o, 900);
+    });
+    foot.appendChild(cp);
+    d.appendChild(foot);
+  }
+  d.addEventListener("pointerdown", e => e.stopPropagation());
+  d.addEventListener("click", e => {
+    e.stopPropagation();
+    sel = sel === b.id ? null : b.id;
+    paint();
+  });
+  return d;
+}
+function measure() { DATA.blocks.forEach(b => { if (dom[b.id]) H[b.id] = dom[b.id].offsetHeight; }); }
+function addPath(a, bb, label) {
+  const A = byId[a].pos, B = byId[bb].pos;
+  const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  p.setAttribute("fill", "none"); p.setAttribute("stroke-width", 1.5);
+  p.setAttribute("stroke", "rgba(255,255,255,.28)");
+  p.setAttribute("marker-end", "url(#arrow)");
+  let x1, y1, x2, y2;
+  if (B.x >= A.x + BLOCK_W + 20 || B.x >= A.x) { // target to the right (or same col): right → left
+    x1 = A.x + BLOCK_W; y1 = A.y + Math.min((H[a] || 100) / 2, 60);
+    x2 = B.x - 6; y2 = B.y + Math.min((H[bb] || 100) / 2, 60);
+  } else { // target to the left
+    x1 = A.x; y1 = A.y + Math.min((H[a] || 100) / 2, 60);
+    x2 = B.x + BLOCK_W + 6; y2 = B.y + Math.min((H[bb] || 100) / 2, 60);
+  }
+  const mx = (x1 + x2) / 2;
+  p.setAttribute("d", `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`);
+  svg.appendChild(p); paths.push({ n: p, a, b: bb });
+  if (label) {
+    const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    t.setAttribute("class", "lbl"); t.setAttribute("x", mx); t.setAttribute("y", (y1 + y2) / 2 - 6);
+    t.setAttribute("text-anchor", "middle"); t.textContent = label;
+    svg.appendChild(t); paths.push({ n: t, a, b: bb });
+  }
+}
+function buildEdges() {
+  [...svg.querySelectorAll("path:not(defs path), text")].forEach(n => n.remove());
+  paths = [];
+  DATA.blocks.forEach(b => (b.links || []).forEach(l => { if (byId[l.to]) addPath(b.id, l.to, l.label); }));
+  paint();
+}
+function matches(b) {
+  if (!q) return true;
+  return (b.title + " " + (b.file || "") + " " + (b.note || "") + " " + (b.code || "") + " " + b.id)
+    .toLowerCase().includes(q);
+}
+function related(id) {
+  const set = new Set([id]);
+  (byId[id].links || []).forEach(l => set.add(l.to));
+  DATA.blocks.forEach(b => (b.links || []).forEach(l => { if (l.to === id) set.add(b.id); }));
+  return set;
+}
+function paint() {
+  const rel = sel && byId[sel] ? related(sel) : null;
+  DATA.blocks.forEach(b => {
+    const d = dom[b.id], ok = matches(b);
+    if (!d) return;
+    d.classList.toggle("fade", !ok || (!q && rel && !rel.has(b.id)));
+    d.classList.toggle("sel", b.id === sel);
+    d.classList.toggle("hit", ok && !!q && b.id !== sel);
+  });
+  paths.forEach(p => {
+    const hot = rel && (p.a === sel || p.b === sel);
+    p.n.classList.toggle("hot", !!hot);
+    if (p.n.tagName === "path") p.n.setAttribute("marker-end", hot ? "url(#arrow-hot)" : "url(#arrow)");
+    p.n.classList.toggle("fade", (!!sel && !hot) || (!!q && !hot));
+  });
+}
+function rebuild() {
+  byId = {}; DATA.blocks.forEach(b => byId[b.id] = b);
+  [...canvas.querySelectorAll(".cblock")].forEach(d => d.remove());
+  dom = {};
+  DATA.blocks.forEach(b => { const d = makeBlock(b); canvas.appendChild(d); dom[b.id] = d; });
+  measure(); extents(); buildEdges();
+  el("proj").textContent = PROJ;
+  el("cm-title").textContent = DATA.title;
+  document.title = DATA.title + " — ThoughtBoard";
+  el("emptyhint").style.display = DATA.blocks.length ? "none" : "grid";
+  requestAnimationFrame(() => { measure(); extents(); buildEdges(); });
+}
+
+/* ---------------- live refresh (agent writes, we follow) ---------------- */
+async function pollVersion() {
+  let j;
+  try {
+    const r = await fetch(API + "/version");
+    if (!r.ok) return;
+    j = await r.json();
+  } catch (e) { return; }
+  if (ver === null || j.version === ver) { if (ver === null) ver = j.version; return; }
+  const s = getSelection();
+  if (s && !s.isCollapsed && s.anchorNode && stage.contains(s.anchorNode)) return; // don't yank a text selection
+  if (inField()) return;
+  ver = j.version;
+  try {
+    const r2 = await fetch(API);
+    if (!r2.ok) return;
+    DATA = await r2.json();
+  } catch (e) { return; }
+  rebuild();
+  if (sel && !byId[sel]) sel = null;
+  paint();
+  setStat("synced " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+}
+setInterval(pollVersion, 2000);
+
+/* ---------------- pan + zoom + pinch ---------------- */
+function apply(smooth) {
+  canvas.style.transition = smooth ? "transform .35s cubic-bezier(.22,.7,.2,1)" : "none";
+  canvas.style.transform = `translate(${tx}px,${ty}px) scale(${k})`;
+  el("zl").textContent = Math.round(k * 100) + "%";
+}
+function fit(smooth) {
+  const r = stage.getBoundingClientRect();
+  k = Math.min(1, Math.min((r.width - 32) / W, (r.height - 32) / Hgt));
+  k = Math.max(k, .15);
+  tx = (r.width - W * k) / 2; ty = (r.height - Hgt * k) / 2; apply(smooth);
+}
+function zoom(f, cx, cy) {
+  const r = stage.getBoundingClientRect(), mx = (cx ?? r.width / 2), my = (cy ?? r.height / 2);
+  const ns = Math.min(2.4, Math.max(.15, k * f));
+  tx = mx - (mx - tx) * ns / k; ty = my - (my - ty) * ns / k; k = ns; apply(true);
+}
+const touches = new Map();
+let pinch = null;
+stage.addEventListener("pointerdown", e => {
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size === 2) {
+    const [a, b] = [...touches.values()];
+    pinch = { d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, k0: k, tx0: tx, ty0: ty };
+    drag = false; stage.classList.remove("dragging");
+    return;
+  }
+  drag = true; moved = false; sx = e.clientX - tx; sy = e.clientY - ty; stage.classList.add("dragging");
+  try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+});
+stage.addEventListener("pointermove", e => {
+  if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch && touches.size === 2) {
+    const [a, b] = [...touches.values()];
+    const r = stage.getBoundingClientRect();
+    const mid = { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top };
+    const ns = Math.min(2.4, Math.max(.15, pinch.k0 * (Math.hypot(a.x - b.x, a.y - b.y) || 1) / pinch.d0));
+    const cx = (mid.x - pinch.tx0) / pinch.k0, cy = (mid.y - pinch.ty0) / pinch.k0;
+    k = ns; tx = mid.x - cx * ns; ty = mid.y - cy * ns; apply(false);
+    moved = true;
+    return;
+  }
+  if (!drag) return; moved = true; tx = e.clientX - sx; ty = e.clientY - sy; apply(false);
+});
+const dropTouch = e => { touches.delete(e.pointerId); if (touches.size < 2) pinch = null; };
+stage.addEventListener("pointercancel", e => { dropTouch(e); drag = false; stage.classList.remove("dragging"); });
+stage.addEventListener("pointerup", e => {
+  dropTouch(e);
+  const wasDrag = drag;
+  drag = false; stage.classList.remove("dragging");
+  if (!wasDrag || moved) return;
+  if (e.target.closest(".cblock")) return;
+  sel = null; paint();
+});
+stage.addEventListener("wheel", e => { e.preventDefault(); const r = stage.getBoundingClientRect(); zoom(e.deltaY < 0 ? 1.1 : .9, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+el("zi").onclick = () => zoom(1.18); el("zo").onclick = () => zoom(.85);
+el("zl").onclick = () => fit(true);
+el("fit").onclick = () => fit(true);
+el("q").addEventListener("input", e => { q = e.target.value.trim().toLowerCase(); paint(); });
+document.addEventListener("keydown", e => {
+  if (e.key === "/" && !inField()) { e.preventDefault(); el("q").focus(); }
+  else if (e.key === "Escape") {
+    if (inField()) { document.activeElement.blur(); return; }
+    el("q").value = ""; q = ""; sel = null; paint();
+  }
+  else if ((e.key === "f" || e.key === "F") && !inField()) fit(true);
+});
+window.addEventListener("resize", () => fit(false));
+
+/* ---------------- boot ---------------- */
+(async () => {
+  try {
+    const r = await fetch(API);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    DATA = j;
+  } catch (e) {
+    setStat("load failed");
+    return;
+  }
+  rebuild();
+  fit(false);
+  setStat("updated " + (DATA.updated || "—"));
+})();
+</script>
+</body>
+</html>

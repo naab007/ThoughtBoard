@@ -113,6 +113,12 @@ def build_app(port: int = PORT_DEFAULT) -> FastAPI:
         storage.check_slug("timeline id", timeline_id)
         return page("timeline.html")
 
+    @app.get("/code/{project}/{codemap_id}", response_class=HTMLResponse)
+    async def codemap_page(project: str, codemap_id: str):
+        storage.check_slug("project", project)
+        storage.check_slug("codemap id", codemap_id)
+        return page("code.html")
+
     @app.get("/research/{project}/{doc}", response_class=HTMLResponse)
     async def research_page(project: str, doc: str):
         text = storage.get_research(project, doc)
@@ -153,6 +159,16 @@ def build_app(port: int = PORT_DEFAULT) -> FastAPI:
     @app.put("/api/projects/{project}/maps/{map_id}")
     async def api_save_map(project: str, map_id: str, payload: dict):
         return storage.save_map(project, map_id, payload)
+
+    # ------------------------------------------- codemaps (viewer is read-only:
+    # only the agent writes these, via the MCP tools — hence no POST/PUT here)
+    @app.get("/api/projects/{project}/codemaps/{codemap_id}")
+    async def api_get_codemap(project: str, codemap_id: str):
+        return storage.get_codemap(project, codemap_id)
+
+    @app.get("/api/projects/{project}/codemaps/{codemap_id}/version")
+    async def api_codemap_version(project: str, codemap_id: str):
+        return {"version": storage.codemap_version(project, codemap_id)}
 
     # ---------------------------------------------------------- timelines
     @app.post("/api/projects/{project}/timelines")

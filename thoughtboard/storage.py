@@ -22,6 +22,7 @@ from pathlib import Path
 
 SCHEMA = "thoughtboard/v1"
 TL_SCHEMA = "thoughtboard-timeline/v1"
+CM_SCHEMA = "thoughtboard-codemap/v1"
 STATUSES = ["idea", "researching", "planned", "in-progress", "done", "blocked"]
 PRIORITIES = ["p0", "p1", "p2", "p3", "p4", "p5", "p6"]  # p0 highest, p3 default, p6 someday
 PRIORITY_DEFAULT = "p3"
@@ -115,6 +116,7 @@ def list_projects() -> list[dict]:
             "title": meta.get("title", slug),
             "maps": [_map_summary(p) for p in sorted(pj.parent.glob("maps/*.json"))],
             "timelines": [_timeline_summary(p) for p in sorted(pj.parent.glob("timelines/*.json"))],
+            "codemaps": [_codemap_summary(p) for p in sorted(pj.parent.glob("codemaps/*.json"))],
             "research": [_research_summary(p) for p in sorted(pj.parent.glob("research/*.md"))],
         })
     return out
@@ -570,6 +572,199 @@ def dump_timeline_text(t: dict) -> str:
         if e.get("image"):
             s += f' | img: {e["image"]}'
         lines.append(f'{e["id"]}: {s}')
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- codemaps
+
+def _codemap_path(project: str, codemap_id: str, must_exist: bool = True) -> Path:
+    d = _project_dir(project)
+    check_slug("codemap id", codemap_id)
+    p = d / "codemaps" / f"{codemap_id}.json"
+    if must_exist and not p.exists():
+        have = [q.stem for q in sorted((d / "codemaps").glob("*.json"))]
+        raise StorageError(
+            f"codemap {codemap_id!r} not found in project {project!r}. "
+            f"Existing codemaps: {have or 'none'} — create one with create_codemap"
+        )
+    return p
+
+
+def _codemap_summary(p: Path) -> dict:
+    try:
+        m = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"id": p.stem, "title": p.stem, "updated": "", "blocks": 0}
+    return {"id": p.stem, "title": m.get("title", p.stem),
+            "updated": m.get("updated", ""), "blocks": len(m.get("blocks", []))}
+
+
+def validate_codemap(m: dict) -> None:
+    if not isinstance(m, dict) or not isinstance(m.get("blocks"), list):
+        raise StorageError(f"codemap must be an object with a 'blocks' array (schema {CM_SCHEMA})")
+    if not isinstance(m.get("title"), str) or not m["title"]:
+        raise StorageError("codemap 'title' is required")
+    ids = [b.get("id") for b in m["blocks"]]
+    for i in ids:
+        check_slug("block id", i)
+    dupes = {i for i in ids if ids.count(i) > 1}
+    if dupes:
+        raise StorageError(f"duplicate block ids: {sorted(dupes)}")
+    idset = set(ids)
+    for b in m["blocks"]:
+        if not isinstance(b.get("title"), str) or not b["title"]:
+            raise StorageError(f"block {b.get('id')!r}: 'title' is required")
+        for f in ("file", "lang", "code", "note"):
+            if f in b and not isinstance(b[f], str):
+                raise StorageError(f"block {b['id']!r}: '{f}' must be a string")
+        pos = b.get("pos")
+        if not (isinstance(pos, dict) and isinstance(pos.get("x"), (int, float))
+                and isinstance(pos.get("y"), (int, float))):
+            raise StorageError(f"block {b['id']!r}: 'pos' {{x, y}} is required "
+                               "(codemap blocks are freely placed)")
+        for l in b.get("links", []):
+            if l.get("to") not in idset:
+                raise StorageError(f"block {b['id']!r}: link target {l.get('to')!r} "
+                                   "does not exist in this codemap")
+
+
+def get_codemap(project: str, codemap_id: str) -> dict:
+    p = _codemap_path(project, codemap_id)
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise StorageError(f"codemap file {p.name} is corrupt JSON: {e}") from e
+
+
+def save_codemap(project: str, codemap_id: str, m: dict) -> dict:
+    _codemap_path(project, codemap_id, must_exist=False)
+    m = dict(m)
+    m.setdefault("schema", CM_SCHEMA)
+    m["project"], m["codemap"] = project, codemap_id
+    validate_codemap(m)
+    m["updated"] = _today()
+    path = _codemap_path(project, codemap_id, must_exist=False)
+    _atomic_write(path, json.dumps(m, indent=2, ensure_ascii=False) + "\n")
+    return {"project": project, "codemap": codemap_id, "updated": m["updated"],
+            "blocks": len(m["blocks"]), "version": path.stat().st_mtime_ns}
+
+
+def create_codemap(project: str, codemap_id: str, title: str, description: str = "") -> dict:
+    p = _codemap_path(project, codemap_id, must_exist=False)
+    if p.exists():
+        raise StorageError(f"codemap {codemap_id!r} already exists in {project!r}")
+    return save_codemap(project, codemap_id, {
+        "schema": CM_SCHEMA, "project": project, "codemap": codemap_id,
+        "title": title, "description": description, "blocks": [],
+    })
+
+
+def delete_codemap(project: str, codemap_id: str) -> dict:
+    _codemap_path(project, codemap_id).unlink()
+    return {"deleted": codemap_id, "project": project}
+
+
+def codemap_version(project: str, codemap_id: str) -> int:
+    return _codemap_path(project, codemap_id).stat().st_mtime_ns
+
+
+def upsert_code_block(project: str, codemap_id: str, block_id: str, *, title=None,
+                      file=None, lang=None, code=None, note=None, pos=None) -> dict:
+    m = get_codemap(project, codemap_id)
+    check_slug("block id", block_id)
+    block = next((b for b in m["blocks"] if b["id"] == block_id), None)
+    creating = block is None
+    if creating:
+        if not title:
+            raise StorageError(f"creating block {block_id!r} requires a title")
+        if pos is None:
+            max_x = max((b["pos"]["x"] for b in m["blocks"]), default=-420)
+            pos = {"x": max_x + 480, "y": 60}
+        block = {"id": block_id, "title": title, "pos": pos}
+        m["blocks"].append(block)
+    if title is not None:
+        block["title"] = title
+    if file is not None:
+        block["file"] = file
+    if lang is not None:
+        block["lang"] = lang
+    if code is not None:
+        block["code"] = code
+    if note is not None:
+        block["note"] = note
+    if pos is not None:
+        block["pos"] = pos
+    save_codemap(project, codemap_id, m)
+    return {"block": {k: v for k, v in block.items() if k != "code"},
+            "code_lines": len((block.get("code") or "").splitlines()), "created": creating}
+
+
+def delete_code_block(project: str, codemap_id: str, block_id: str) -> dict:
+    m = get_codemap(project, codemap_id)
+    if not any(b["id"] == block_id for b in m["blocks"]):
+        raise StorageError(f"block {block_id!r} not found — existing: "
+                           f"{[b['id'] for b in m['blocks']]}")
+    m["blocks"] = [b for b in m["blocks"] if b["id"] != block_id]
+    for b in m["blocks"]:
+        if b.get("links"):
+            b["links"] = [l for l in b["links"] if l.get("to") != block_id]
+            if not b["links"]:
+                b.pop("links")
+    save_codemap(project, codemap_id, m)
+    return {"deleted": block_id, "blocks_left": len(m["blocks"])}
+
+
+def link_code_blocks(project: str, codemap_id: str, from_id: str, to_id: str,
+                     label: str = "calls") -> dict:
+    m = get_codemap(project, codemap_id)
+    ids = {b["id"] for b in m["blocks"]}
+    for i in (from_id, to_id):
+        if i not in ids:
+            raise StorageError(f"block {i!r} not found — existing: {sorted(ids)}")
+    if from_id == to_id:
+        raise StorageError("cannot link a block to itself")
+    src = next(b for b in m["blocks"] if b["id"] == from_id)
+    links = src.setdefault("links", [])
+    existing = next((l for l in links if l["to"] == to_id), None)
+    if existing:
+        existing["label"] = label
+    else:
+        links.append({"to": to_id, "label": label})
+    save_codemap(project, codemap_id, m)
+    return {"from": from_id, "to": to_id, "label": label, "updated_existing": bool(existing)}
+
+
+def unlink_code_blocks(project: str, codemap_id: str, from_id: str, to_id: str) -> dict:
+    m = get_codemap(project, codemap_id)
+    src = next((b for b in m["blocks"] if b["id"] == from_id), None)
+    if not src or not any(l["to"] == to_id for l in src.get("links", [])):
+        raise StorageError(f"no link {from_id!r} -> {to_id!r} exists")
+    src["links"] = [l for l in src["links"] if l["to"] != to_id]
+    if not src["links"]:
+        src.pop("links")
+    save_codemap(project, codemap_id, m)
+    return {"unlinked": f"{from_id} -> {to_id}"}
+
+
+def dump_codemap_text(m: dict) -> str:
+    """Structure without code bodies (get_codemap returns full code)."""
+    lines = [f'# {m.get("title", "?")} ({m.get("project", "?")}/{m.get("codemap", "?")} '
+             f'codemap) · updated {m.get("updated", "?")} · {len(m["blocks"])} blocks']
+    if m.get("description"):
+        lines.append(" ".join(m["description"].split()))
+    for b in m["blocks"]:
+        s = f'{b["id"]} [{b.get("lang", "?")}] {b["title"]}'
+        if b.get("file"):
+            s += f' ({b["file"]})'
+        note = " ".join((b.get("note") or "").split())
+        if note:
+            s += f" — {note}"
+        s += f' | {len((b.get("code") or "").splitlines())} lines'
+        links = b.get("links") or []
+        if links:
+            s += " | → " + ", ".join(
+                l["to"] + (f' ({l["label"]})' if l.get("label") else "") for l in links)
+        lines.append(s)
     return "\n".join(lines)
 
 

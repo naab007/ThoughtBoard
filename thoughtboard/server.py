@@ -136,6 +136,8 @@ def dump_board(project: str, map_id: str | None = None) -> str:
         parts.append(storage.dump_map_text(storage.get_map(project, m["id"])))
     for t in proj.get("timelines", []):
         parts.append(storage.dump_timeline_text(storage.get_timeline(project, t["id"])))
+    for c in proj.get("codemaps", []):
+        parts.append(storage.dump_codemap_text(storage.get_codemap(project, c["id"])))
     if proj["research"]:
         parts.append("research docs (read with get_research): "
                      + ", ".join(f'{r["doc"]} "{r["title"]}"' for r in proj["research"]))
@@ -233,6 +235,61 @@ def upsert_timeline_entry(project: str, timeline_id: str, entry_id: str,
 def delete_timeline_entry(project: str, timeline_id: str, entry_id: str) -> dict:
     """Delete a timeline entry (its image is removed too if nothing else uses it)."""
     return storage.delete_timeline_entry(project, timeline_id, entry_id)
+
+
+@mcp.tool()
+def create_codemap(project: str, codemap_id: str, title: str, description: str = "") -> dict:
+    """Create a code map — a read-only board of syntax-highlighted code blocks with
+    labeled directed links showing how they relate (calls/imports/raises/...).
+    ONLY the agent writes these (the portal page at /code/<project>/<id> is a
+    viewer). Use upsert_code_block + link_code_blocks to populate, and choose pos
+    yourself to lay it out readably (blocks are ~420px wide; leave ~80px gaps)."""
+    return storage.create_codemap(project, codemap_id, title, description)
+
+
+@mcp.tool()
+def get_codemap(project: str, codemap_id: str) -> dict:
+    """Read a full code map including code bodies (dump_board shows structure only)."""
+    return storage.get_codemap(project, codemap_id)
+
+
+@mcp.tool()
+def delete_codemap(project: str, codemap_id: str) -> dict:
+    """Delete a code map permanently."""
+    return storage.delete_codemap(project, codemap_id)
+
+
+@mcp.tool()
+def upsert_code_block(project: str, codemap_id: str, block_id: str,
+                      title: str | None = None, file: str | None = None,
+                      lang: str | None = None, code: str | None = None,
+                      note: str | None = None, pos: dict | None = None) -> dict:
+    """Create or update a code block. title e.g. 'pipeline.run_video_job',
+    file = source path for reference, lang = python|js|ts|c|cpp|cs|java|... (drives
+    highlighting), code = the block text verbatim, note = 1-2 sentences of context,
+    pos = {x, y} canvas placement (omit on create to cascade rightward)."""
+    return storage.upsert_code_block(project, codemap_id, block_id, title=title,
+                                     file=file, lang=lang, code=code, note=note, pos=pos)
+
+
+@mcp.tool()
+def delete_code_block(project: str, codemap_id: str, block_id: str) -> dict:
+    """Delete a code block; inbound links are removed."""
+    return storage.delete_code_block(project, codemap_id, block_id)
+
+
+@mcp.tool()
+def link_code_blocks(project: str, codemap_id: str, from_id: str, to_id: str,
+                     label: str = "calls") -> dict:
+    """Add (or relabel) a directed link between blocks, e.g. 'calls', 'imports',
+    'raises', 'reads'."""
+    return storage.link_code_blocks(project, codemap_id, from_id, to_id, label)
+
+
+@mcp.tool()
+def unlink_code_blocks(project: str, codemap_id: str, from_id: str, to_id: str) -> dict:
+    """Remove a directed link between blocks."""
+    return storage.unlink_code_blocks(project, codemap_id, from_id, to_id)
 
 
 @mcp.tool()
